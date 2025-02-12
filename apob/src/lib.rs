@@ -52,6 +52,12 @@ impl ApobEntry {
         let group = self.group & !APOB_CANCELLED;
         ApobGroup::from_repr(group as usize)
     }
+    /// Checks whether this group has been cancelled
+    ///
+    /// A group is cancelled when its top 16 bits are all set to 1
+    pub fn cancelled(&self) -> bool {
+        (self.group & APOB_CANCELLED) == APOB_CANCELLED
+    }
 }
 
 /// Signature, which must be the first 4 bytes of the blob

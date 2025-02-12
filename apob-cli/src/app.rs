@@ -1,7 +1,12 @@
 use crate::Entry;
 
+use std::collections::HashMap;
+
 use ratatui::{
-    crossterm::event::{self, Event, KeyCode, KeyEventKind, MouseEventKind},
+    crossterm::event::{
+        self, Event, KeyCode, KeyEventKind, MouseButton, MouseEvent,
+        MouseEventKind,
+    },
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
     text::Text,
@@ -19,8 +24,10 @@ pub struct App {
     item_scroll_state: ratatui::widgets::ScrollbarState,
     data_state: ratatui::widgets::TableState,
     data_scroll_state: ratatui::widgets::ScrollbarState,
+    data_scroll_cache: HashMap<usize, usize>,
     data_scroll_max: usize,
     data_focus: bool,
+    window_height: u16,
 }
 
 impl App {
@@ -30,8 +37,10 @@ impl App {
             item_scroll_state: ScrollbarState::new(items.len()),
             data_state: TableState::default().with_selected(0),
             data_scroll_state: ScrollbarState::new(1),
+            data_scroll_cache: HashMap::new(),
             data_scroll_max: 1,
             data_focus: false,
+            window_height: 16,
             items,
             header,
         };
@@ -47,41 +56,83 @@ impl App {
         .unwrap();
         loop {
             terminal.draw(|frame| self.draw(frame)).unwrap();
-            match event::read() {
+            let e = event::read();
+            // Use the mouse to set focus in one pane or the other
+            if let Ok(Event::Mouse(m)) = &e {
+                self.data_focus = m.column > 45;
+            }
+            match e {
                 Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {
                     match key.code {
+                        KeyCode::Char('0') => {
+                            if self.data_focus {
+                                self.set_data_scroll(0)
+                            } else {
+                                self.set_item_scroll(0)
+                            }
+                        }
                         KeyCode::Char('q') | KeyCode::Esc => break,
                         KeyCode::Char('j') | KeyCode::Down => {
                             if self.data_focus {
-                                self.next_data_row()
+                                self.next_data_row(1)
                             } else {
-                                self.next_item_row()
+                                self.next_item_row(1)
                             }
                         }
                         KeyCode::Char('k') | KeyCode::Up => {
                             if self.data_focus {
-                                self.prev_data_row()
+                                self.prev_data_row(1)
                             } else {
-                                self.prev_item_row()
+                                self.prev_item_row(1)
+                            }
+                        }
+                        KeyCode::Char('l') | KeyCode::Right => {
+                            self.data_focus = true;
+                        }
+                        KeyCode::Char('h') | KeyCode::Left => {
+                            self.data_focus = false;
+                        }
+                        KeyCode::PageDown => {
+                            if self.data_focus {
+                                self.next_data_row(self.window_height.into())
+                            } else {
+                                self.next_item_row(self.window_height.into())
+                            }
+                        }
+                        KeyCode::PageUp => {
+                            if self.data_focus {
+                                self.prev_data_row(self.window_height.into())
+                            } else {
+                                self.prev_item_row(self.window_height.into())
                             }
                         }
                         _ => (),
                     }
                 }
+                Ok(Event::Mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    row,
+                    ..
+                })) if !self.data_focus => {
+                    let i = self.item_state.offset();
+                    if let Some(sel) = (i + usize::from(row)).checked_sub(2) {
+                        if sel < self.items.len() {
+                            self.set_item_scroll(sel);
+                        }
+                    }
+                }
                 Ok(Event::Mouse(m)) if m.kind == MouseEventKind::ScrollDown => {
-                    if m.column > 45 {
-                        self.data_focus = true;
-                        self.next_data_row()
+                    if self.data_focus {
+                        self.next_data_row(1)
                     } else {
-                        self.next_item_row()
+                        self.next_item_row(1)
                     }
                 }
                 Ok(Event::Mouse(m)) if m.kind == MouseEventKind::ScrollUp => {
-                    if m.column > 45 {
-                        self.data_focus = true;
-                        self.prev_data_row()
+                    if self.data_focus {
+                        self.prev_data_row(1)
                     } else {
-                        self.prev_item_row()
+                        self.prev_item_row(1)
                     }
                 }
                 Ok(..) => (),
@@ -99,16 +150,15 @@ impl App {
         let cols =
             &Layout::horizontal([Constraint::Length(45), Constraint::Fill(1)]);
         let rects = cols.split(frame.area());
-        self.render_table(frame, rects[0]);
-        self.render_item_scrollbar(frame, rects[0]);
-        self.render_data(frame, rects[1]);
-        self.render_data_scrollbar(frame, rects[1]);
+        self.render_table(frame, rects[0], !self.data_focus);
+        self.render_data(frame, rects[1], self.data_focus);
+
+        self.window_height = rects[0].height.saturating_sub(3);
     }
 
-    fn render_data(&mut self, frame: &mut Frame, area: Rect) {
-        let header_style = Style::default().add_modifier(Modifier::BOLD);
-        let selected_row_style =
-            Style::default().add_modifier(Modifier::REVERSED);
+    fn render_data(&mut self, frame: &mut Frame, area: Rect, focus: bool) {
+        let header_style = Style::new().add_modifier(Modifier::BOLD);
+        let selected_row_style = Style::new().add_modifier(Modifier::REVERSED);
 
         let width = 16; // TODO select based on terminal size
         let header = std::iter::once(Cell::from("OFFSET"))
@@ -152,12 +202,46 @@ impl App {
         )
         .header(header)
         .row_highlight_style(selected_row_style)
-        .block(Block::new().borders(Borders::ALL));
+        .block(
+            Block::new()
+                .borders(Borders::ALL)
+                .border_style(Self::border_style(focus)),
+        );
 
         frame.render_stateful_widget(t, area, &mut self.data_state);
+
+        // Draw the scroll bar
+        frame.render_stateful_widget(
+            Scrollbar::default()
+                .orientation(ScrollbarOrientation::VerticalRight)
+                .begin_symbol(None)
+                .end_symbol(None)
+                .style(Self::scrollbar_style(focus)),
+            area.inner(Margin {
+                vertical: 1,
+                horizontal: 1,
+            }),
+            &mut self.data_scroll_state,
+        );
     }
 
-    fn render_table(&mut self, frame: &mut Frame, area: Rect) {
+    fn border_style(focus: bool) -> Style {
+        if focus {
+            Style::new()
+        } else {
+            Style::new().add_modifier(Modifier::DIM)
+        }
+    }
+
+    fn scrollbar_style(focus: bool) -> Style {
+        if focus {
+            Style::reset()
+        } else {
+            Style::reset().add_modifier(Modifier::DIM)
+        }
+    }
+
+    fn render_table(&mut self, frame: &mut Frame, area: Rect, focus: bool) {
         let header_style = Style::default().add_modifier(Modifier::BOLD);
         let selected_row_style =
             Style::default().add_modifier(Modifier::REVERSED);
@@ -173,21 +257,28 @@ impl App {
         let rows = self.items.iter().map(|item| {
             let entry = &item.entry;
             let group = entry.group().unwrap();
-            let color = match group {
-                apob::ApobGroup::MEMORY => Color::Blue,
-                apob::ApobGroup::DF => Color::LightBlue,
-                apob::ApobGroup::CCX => Color::Red,
-                apob::ApobGroup::NBIO => Color::LightGreen,
-                apob::ApobGroup::FCH => Color::LightRed,
-                apob::ApobGroup::PSP => Color::LightCyan,
-                apob::ApobGroup::GENERAL => Color::Magenta,
-                apob::ApobGroup::SMBIOS => Color::Green,
-                apob::ApobGroup::FABRIC => Color::Cyan,
-                apob::ApobGroup::APCB => Color::LightMagenta,
+            let cancelled = entry.cancelled();
+            let style = if cancelled {
+                Style::new().add_modifier(Modifier::DIM)
+            } else {
+                let color = match group {
+                    apob::ApobGroup::MEMORY => Color::Blue,
+                    apob::ApobGroup::DF => Color::LightBlue,
+                    apob::ApobGroup::CCX => Color::Red,
+                    apob::ApobGroup::NBIO => Color::LightGreen,
+                    apob::ApobGroup::FCH => Color::LightRed,
+                    apob::ApobGroup::PSP => Color::LightCyan,
+                    apob::ApobGroup::GENERAL => Color::Magenta,
+                    apob::ApobGroup::SMBIOS => Color::Green,
+                    apob::ApobGroup::FABRIC => Color::Cyan,
+                    apob::ApobGroup::APCB => Color::LightMagenta,
+                };
+                Style::new().fg(color)
             };
             [
                 cfl(format!("{:05x}", item.offset)),
-                cf(format!("{:?}", group)).style(Style::default().fg(color)),
+                cf(format!("{:?}{}", group, if cancelled { "*" } else { "" }))
+                    .style(style),
                 cfl(format!("{:x}", entry.ty & !apob::APOB_CANCELLED)),
                 cfl(format!("{:x}", entry.inst)),
                 cfl(format!(
@@ -197,9 +288,9 @@ impl App {
             ]
             .into_iter()
             .collect::<Row>()
-            .style(Style::new())
             .height(1)
         });
+
         let t = Table::new(
             rows,
             [
@@ -212,18 +303,20 @@ impl App {
         )
         .header(header)
         .row_highlight_style(selected_row_style)
-        .block(Block::new().borders(Borders::ALL));
+        .block(
+            Block::new()
+                .borders(Borders::ALL)
+                .border_style(Self::border_style(focus)),
+        );
 
         frame.render_stateful_widget(t, area, &mut self.item_state);
-    }
 
-    fn render_item_scrollbar(&mut self, frame: &mut Frame, area: Rect) {
         frame.render_stateful_widget(
             Scrollbar::default()
                 .orientation(ScrollbarOrientation::VerticalRight)
                 .begin_symbol(None)
                 .end_symbol(None)
-                .style(Style::reset()),
+                .style(Self::scrollbar_style(focus)),
             area.inner(Margin {
                 vertical: 1,
                 horizontal: 1,
@@ -232,32 +325,17 @@ impl App {
         );
     }
 
-    fn render_data_scrollbar(&mut self, frame: &mut Frame, area: Rect) {
-        frame.render_stateful_widget(
-            Scrollbar::default()
-                .orientation(ScrollbarOrientation::VerticalRight)
-                .begin_symbol(None)
-                .end_symbol(None)
-                .style(Style::reset()),
-            area.inner(Margin {
-                vertical: 1,
-                horizontal: 1,
-            }),
-            &mut self.data_scroll_state,
-        );
-    }
-
-    pub fn next_item_row(&mut self) {
+    pub fn next_item_row(&mut self, d: usize) {
         let i = match self.item_state.selected() {
-            Some(i) => (i + 1) % self.items.len(),
+            Some(i) => (i + d).min(self.items.len() - 1),
             None => 0,
         };
         self.set_item_scroll(i);
     }
 
-    pub fn prev_item_row(&mut self) {
+    pub fn prev_item_row(&mut self, d: usize) {
         let i = match self.item_state.selected() {
-            Some(i) => i.checked_sub(1).unwrap_or_else(|| self.items.len() - 1),
+            Some(i) => i.saturating_sub(d),
             None => 0,
         };
         self.set_item_scroll(i);
@@ -266,25 +344,32 @@ impl App {
     fn set_item_scroll(&mut self, i: usize) {
         self.item_state.select(Some(i));
         self.item_scroll_state = self.item_scroll_state.position(i);
-        self.data_state.select(Some(0));
+        self.data_state
+            .select(Some(self.data_scroll_cache.get(&i).cloned().unwrap_or(0)));
         self.data_scroll_max = self.items[i].data.len().div_ceil(16);
         self.data_scroll_state = ScrollbarState::new(self.data_scroll_max);
     }
 
-    pub fn next_data_row(&mut self) {
+    pub fn next_data_row(&mut self, d: usize) {
         let i = match self.data_state.selected() {
-            Some(i) => (i + 1) % self.data_scroll_max,
+            Some(i) => (i + d).min(self.data_scroll_max - 1),
             None => 0,
         };
-        self.data_state.select(Some(i));
-        self.data_scroll_state = self.data_scroll_state.position(i);
+        self.set_data_scroll(i);
     }
 
-    pub fn prev_data_row(&mut self) {
+    pub fn prev_data_row(&mut self, d: usize) {
         let i = match self.data_state.selected() {
-            Some(i) => i.checked_sub(1).unwrap_or(self.data_scroll_max - 1),
+            Some(i) => i.saturating_sub(d),
             None => 0,
         };
+        self.set_data_scroll(i);
+    }
+
+    pub fn set_data_scroll(&mut self, i: usize) {
+        if let Some(j) = self.item_state.selected() {
+            self.data_scroll_cache.insert(j, i);
+        }
         self.data_state.select(Some(i));
         self.data_scroll_state = self.data_scroll_state.position(i);
     }

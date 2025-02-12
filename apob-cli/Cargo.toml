@@ -1,0 +1,10 @@
+[package]
+name = "apob-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow.workspace = true
+apob.workspace = true
+clap.workspace = true
+zerocopy.workspace = true

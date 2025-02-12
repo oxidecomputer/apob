@@ -1,8 +1,24 @@
-[package]
-name = "apob"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+resolver = "2"
+members = [
+    "apob",
+    "apob-cli",
+]
 
-[dependencies]
+[workspace.package]
+edition = "2021"
+license = "MPL-2.0"
+rust-version = "1.81"
+
+[workspace.dependencies]
+apob = { path = "apob", default-features = true }
+apob-cli = { path = "apob-cli", default-features = false }
+
+anyhow = { version = "1" }
+clap = { version = "4", features = ["derive"] }
 strum = { version = "0.27.0", features = ["derive"] }
 zerocopy = { version = "0.8.17", features = ["derive"] }
+
+[profile.release]
+debug = 2
+lto = true

@@ -19,18 +19,24 @@ pub struct App {
     item_scroll_state: ratatui::widgets::ScrollbarState,
     data_state: ratatui::widgets::TableState,
     data_scroll_state: ratatui::widgets::ScrollbarState,
+    data_scroll_max: usize,
+    data_focus: bool,
 }
 
 impl App {
     pub fn new(header: apob::ApobHeader, items: Vec<Entry>) -> Self {
-        Self {
+        let mut out = Self {
             item_state: TableState::default().with_selected(0),
             item_scroll_state: ScrollbarState::new(items.len()),
             data_state: TableState::default().with_selected(0),
             data_scroll_state: ScrollbarState::new(1),
+            data_scroll_max: 1,
+            data_focus: false,
             items,
             header,
-        }
+        };
+        out.set_item_scroll(0);
+        out
     }
 
     pub fn run(mut self, mut terminal: ratatui::DefaultTerminal) {
@@ -45,21 +51,48 @@ impl App {
                 Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {
                     match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => break,
-                        KeyCode::Char('j') | KeyCode::Down => self.next_row(),
-                        KeyCode::Char('k') | KeyCode::Up => self.prev_row(),
+                        KeyCode::Char('j') | KeyCode::Down => {
+                            if self.data_focus {
+                                self.next_data_row()
+                            } else {
+                                self.next_item_row()
+                            }
+                        }
+                        KeyCode::Char('k') | KeyCode::Up => {
+                            if self.data_focus {
+                                self.prev_data_row()
+                            } else {
+                                self.prev_item_row()
+                            }
+                        }
                         _ => (),
                     }
                 }
                 Ok(Event::Mouse(m)) if m.kind == MouseEventKind::ScrollDown => {
-                    self.next_row()
+                    if m.column > 45 {
+                        self.data_focus = true;
+                        self.next_data_row()
+                    } else {
+                        self.next_item_row()
+                    }
                 }
                 Ok(Event::Mouse(m)) if m.kind == MouseEventKind::ScrollUp => {
-                    self.prev_row()
+                    if m.column > 45 {
+                        self.data_focus = true;
+                        self.prev_data_row()
+                    } else {
+                        self.prev_item_row()
+                    }
                 }
                 Ok(..) => (),
                 Err(_) => break,
             }
         }
+        ratatui::crossterm::execute!(
+            std::io::stdout(),
+            ratatui::crossterm::event::DisableMouseCapture
+        )
+        .unwrap();
     }
 
     fn draw(&mut self, frame: &mut Frame) {
@@ -112,7 +145,7 @@ impl App {
         let t = Table::new(
             rows,
             std::iter::once(Constraint::Length(8))
-                .chain((0..16).map(|_| Constraint::Length(2)))
+                .chain((0..width).map(|_| Constraint::Length(2)))
                 .chain(std::iter::once(Constraint::Length(
                     u16::try_from(width).unwrap(),
                 ))),
@@ -214,7 +247,7 @@ impl App {
         );
     }
 
-    pub fn next_row(&mut self) {
+    pub fn next_item_row(&mut self) {
         let i = match self.item_state.selected() {
             Some(i) => (i + 1) % self.items.len(),
             None => 0,
@@ -222,7 +255,7 @@ impl App {
         self.set_item_scroll(i);
     }
 
-    pub fn prev_row(&mut self) {
+    pub fn prev_item_row(&mut self) {
         let i = match self.item_state.selected() {
             Some(i) => i.checked_sub(1).unwrap_or_else(|| self.items.len() - 1),
             None => 0,
@@ -234,7 +267,25 @@ impl App {
         self.item_state.select(Some(i));
         self.item_scroll_state = self.item_scroll_state.position(i);
         self.data_state.select(Some(0));
-        self.data_scroll_state =
-            ScrollbarState::new(self.items[i].data.len().div_ceil(16));
+        self.data_scroll_max = self.items[i].data.len().div_ceil(16);
+        self.data_scroll_state = ScrollbarState::new(self.data_scroll_max);
+    }
+
+    pub fn next_data_row(&mut self) {
+        let i = match self.data_state.selected() {
+            Some(i) => (i + 1) % self.data_scroll_max,
+            None => 0,
+        };
+        self.data_state.select(Some(i));
+        self.data_scroll_state = self.data_scroll_state.position(i);
+    }
+
+    pub fn prev_data_row(&mut self) {
+        let i = match self.data_state.selected() {
+            Some(i) => i.checked_sub(1).unwrap_or(self.data_scroll_max - 1),
+            None => 0,
+        };
+        self.data_state.select(Some(i));
+        self.data_scroll_state = self.data_scroll_state.position(i);
     }
 }

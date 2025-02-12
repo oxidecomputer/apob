@@ -6,6 +6,8 @@ use std::{
 };
 use zerocopy::FromBytes;
 
+mod app;
+
 /// Simple CLI to investigate an APOB file
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -13,8 +15,17 @@ struct Args {
     /// Prints data contents of all sections
     #[clap(short, long)]
     verbose: bool,
+    /// Runs an interactive viewer
+    #[clap(short, long)]
+    interactive: bool,
     /// Name of the file to load
     name: PathBuf,
+}
+
+struct Entry {
+    offset: usize,
+    entry: apob::ApobEntry,
+    data: Vec<u8>,
 }
 
 fn main() -> Result<()> {
@@ -29,32 +40,46 @@ fn main() -> Result<()> {
     assert_eq!(header.sig, apob::APOB_SIG, "invalid signature");
     assert_eq!(header.version, apob::APOB_VERSION, "invalid version");
 
-    println!("{header:?}");
-    println!(
-        "{:<7}   {:<8}   {:>4}   {:>8}   {:>9}",
-        "OFFSET", "GROUP", "TYPE", "INSTANCE", "DATA SIZE"
-    );
+    let mut entries = vec![];
     let mut pos = header.offset as usize;
     while pos < data.len() {
         let (entry, _rest) =
             apob::ApobEntry::ref_from_prefix(&data[pos..]).unwrap();
-
-        println!(
-            "{pos:#07x}   {:<8}   {:>4x}   {:>8x}   {:>9x}",
-            format!("{:?}", entry.group().unwrap()),
-            entry.ty & !apob::APOB_CANCELLED,
-            entry.inst,
-            entry.size as usize - std::mem::size_of_val(entry)
-        );
-        if args.verbose {
-            print_hex(
-                &mut std::io::stdout(),
-                &data[pos..][..entry.size as usize]
-                    [std::mem::size_of_val(entry)..],
-            )
-            .unwrap();
-        }
+        let entry_data =
+            &data[pos..][..entry.size as usize][std::mem::size_of_val(entry)..];
+        entries.push(Entry {
+            offset: pos,
+            entry: *entry,
+            data: entry_data.to_vec(),
+        });
         pos += entry.size as usize;
+    }
+
+    if args.interactive {
+        let terminal = ratatui::init();
+        let app = app::App::new(*header, entries);
+        app.run(terminal);
+        ratatui::restore();
+    } else {
+        println!("{header:?}");
+        println!(
+            "{:<7}   {:<8}   {:>4}   {:>8}   {:>9}",
+            "OFFSET", "GROUP", "TYPE", "INSTANCE", "DATA SIZE"
+        );
+        for item in &entries {
+            let entry = &item.entry;
+            println!(
+                "{:#07x}   {:<8}   {:>4x}   {:>8x}   {:>9x}",
+                item.offset,
+                format!("{:?}", entry.group().unwrap()),
+                entry.ty & !apob::APOB_CANCELLED,
+                entry.inst,
+                entry.size as usize - std::mem::size_of_val(entry)
+            );
+            if args.verbose {
+                print_hex(&mut std::io::stdout(), &item.data).unwrap();
+            }
+        }
     }
 
     Ok(())

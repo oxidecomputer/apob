@@ -22,6 +22,7 @@ enum DataGrouping {
     Byte,
     Word,
     DoubleWord,
+    QuadWord,
 }
 
 enum Endian {
@@ -42,6 +43,7 @@ impl DataGrouping {
             DataGrouping::Byte => 1,
             DataGrouping::Word => 2,
             DataGrouping::DoubleWord => 4,
+            DataGrouping::QuadWord => 8,
         }
     }
 }
@@ -120,6 +122,9 @@ impl App {
                         }
                         KeyCode::Char('4') => {
                             self.data_grouping = DataGrouping::DoubleWord
+                        }
+                        KeyCode::Char('8') => {
+                            self.data_grouping = DataGrouping::QuadWord
                         }
                         KeyCode::Char('e') => {
                             self.data_endian = match self.data_endian {
@@ -527,9 +532,10 @@ impl App {
         frame.render_stateful_widget(t, area, &mut self.data_state);
 
         // Draw the scroll bar
-        if let Some(i) = self.data_state.selected() {
+        if let Some(j) = self.data_state.selected() {
             let mut data_scroll_state =
-                ScrollbarState::new(self.items.len()).position(i);
+                ScrollbarState::new(self.items[i].data.len().div_ceil(width))
+                    .position(j);
             frame.render_stateful_widget(
                 Scrollbar::default()
                     .orientation(ScrollbarOrientation::VerticalRight)
@@ -571,6 +577,14 @@ impl App {
             if a == 0 && b == 0 {
                 style.fg(Color::Cyan)
             } else if c == 0 && d == 0 {
+                style.fg(Color::Blue)
+            } else {
+                style.fg(Color::Green)
+            }
+        } else if let [a, b, c, d, e, f, g, h] = *b {
+            if a == 0 && b == 0 && c == 0 && d == 0 {
+                style.fg(Color::Cyan)
+            } else if e == 0 && f == 0 && g == 0 && h == 0 {
                 style.fg(Color::Blue)
             } else {
                 style.fg(Color::Green)

@@ -56,6 +56,7 @@ pub struct App {
     data_endian: Endian,
     data_focus: bool,
     data_grouping: DataGrouping,
+    data_colors: bool,
     specialized_state: Option<SpecializedState>,
     window_height: u16,
 }
@@ -71,6 +72,7 @@ impl App {
             data_width: 8,
             data_endian: Endian::Little,
             data_focus: false,
+            data_colors: false,
             specialized_state: None,
             window_height: 16,
             items,
@@ -145,6 +147,9 @@ impl App {
                         }
                         KeyCode::Char('h') | KeyCode::Left => {
                             self.data_focus = false;
+                        }
+                        KeyCode::Char('c') => {
+                            self.data_colors = !self.data_colors;
                         }
                         KeyCode::PageDown => {
                             if self.data_focus {
@@ -257,12 +262,13 @@ impl App {
         }
 
         let help = Span::raw(format!(
-            " [{}]-byte groups, {}-[e]ndian",
+            " [{}]-byte groups, [c]olor {}, {}-[e]ndian",
             self.data_grouping.bytes(),
+            if self.data_colors { "on" } else { "off" },
             match self.data_endian {
                 Endian::Big => "big",
                 Endian::Little => "little",
-            }
+            },
         ));
         frame.render_widget(help, *rects.last().unwrap());
     }
@@ -474,7 +480,11 @@ impl App {
                             }
                         }
                     }
-                    Cell::from(s)
+                    Cell::from(Line::from(s).style(if self.data_colors {
+                        Self::data_style(c)
+                    } else {
+                        Style::new()
+                    }))
                 }))
                 .chain(
                     // Empty cells to fill out the remaining size
@@ -532,6 +542,41 @@ impl App {
                 }),
                 &mut data_scroll_state,
             );
+        }
+    }
+
+    fn data_style(b: &[u8]) -> Style {
+        let style = Style::new();
+        if b.iter().all(|b| *b == 0) {
+            style.add_modifier(Modifier::DIM)
+        } else if b.iter().all(|b| *b == 0xFF) {
+            style.fg(Color::Yellow)
+        } else if let [b] = b {
+            if b & 0xF == 0 {
+                style.fg(Color::Cyan)
+            } else if b & 0xF0 == 0 {
+                style.fg(Color::Blue)
+            } else {
+                style.fg(Color::Green)
+            }
+        } else if let [a, b] = *b {
+            if a == 0 {
+                style.fg(Color::Cyan)
+            } else if b == 0 {
+                style.fg(Color::Blue)
+            } else {
+                style.fg(Color::Green)
+            }
+        } else if let [a, b, c, d] = *b {
+            if a == 0 && b == 0 {
+                style.fg(Color::Cyan)
+            } else if c == 0 && d == 0 {
+                style.fg(Color::Blue)
+            } else {
+                style.fg(Color::Green)
+            }
+        } else {
+            style
         }
     }
 

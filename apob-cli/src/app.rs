@@ -26,6 +26,7 @@ pub struct App {
     data_scroll_state: ratatui::widgets::ScrollbarState,
     data_scroll_cache: HashMap<usize, usize>,
     data_scroll_max: usize,
+    data_width: usize,
     data_focus: bool,
     window_height: u16,
 }
@@ -39,6 +40,7 @@ impl App {
             data_scroll_state: ScrollbarState::new(1),
             data_scroll_cache: HashMap::new(),
             data_scroll_max: 1,
+            data_width: 8,
             data_focus: false,
             window_height: 16,
             items,
@@ -156,11 +158,33 @@ impl App {
         self.window_height = rects[0].height.saturating_sub(3);
     }
 
+    fn resize_data(&mut self, data_width: usize) {
+        if data_width != self.data_width {
+            for (_, row) in self.data_scroll_cache.iter_mut() {
+                let index = *row * self.data_width;
+                *row = index / data_width;
+            }
+            if let Some(row) = self.data_state.selected() {
+                let index = row * self.data_width;
+                self.set_data_scroll(index / data_width);
+            }
+            self.data_width = data_width;
+        }
+    }
+
     fn render_data(&mut self, frame: &mut Frame, area: Rect, focus: bool) {
         let header_style = Style::new().add_modifier(Modifier::BOLD);
         let selected_row_style = Style::new().add_modifier(Modifier::REVERSED);
 
-        let width = 16; // TODO select based on terminal size
+        const OFFSET_COL: u16 = 8;
+        let available_width = area.width - 3;
+        let width = if available_width >= OFFSET_COL + 1 + 16 * 3 + 16 {
+            16
+        } else {
+            8
+        };
+        self.resize_data(width);
+
         let header = std::iter::once(Cell::from("OFFSET"))
             .chain((0..width).map(|i| Cell::from(format!("{i:02x}"))))
             .collect::<Row>()
@@ -194,7 +218,7 @@ impl App {
 
         let t = Table::new(
             rows,
-            std::iter::once(Constraint::Length(8))
+            std::iter::once(Constraint::Length(OFFSET_COL))
                 .chain((0..width).map(|_| Constraint::Length(2)))
                 .chain(std::iter::once(Constraint::Length(
                     u16::try_from(width).unwrap(),

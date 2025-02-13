@@ -1,3 +1,5 @@
+#![no_std]
+
 use strum::FromRepr;
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 
@@ -68,3 +70,65 @@ pub const APOB_VERSION: u32 = 0x18;
 
 /// Mask applied to [`ApobEntry::group`] to cancel the group
 pub const APOB_CANCELLED: u32 = 0xFFFF_0000;
+
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[repr(C)]
+pub struct MilanApobEvent {
+    pub class: u32,
+    pub info: u32,
+    pub data0: u32,
+    pub data1: u32,
+}
+
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[repr(C)]
+pub struct MilanApobEventLog {
+    pub count: u16,
+    _pad: u16,
+    pub events: [MilanApobEvent; 64],
+}
+
+#[derive(Copy, Clone, Debug, FromRepr)]
+#[allow(non_camel_case_types)]
+pub enum MilanApobEventClass {
+    ALERT = 5,
+    WARN = 6,
+    ERROR = 7,
+    CRIT = 8,
+    FATAL = 9,
+}
+
+const MILAN_APOB_CCX_MAX_THREADS: usize = 2;
+
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[repr(packed)]
+pub struct MilanApobCore {
+    pub mac_id: u8,
+    pub mac_thread_exists: [u8; MILAN_APOB_CCX_MAX_THREADS],
+}
+
+const MILAN_APOB_CCX_MAX_CORES: usize = 8;
+
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[repr(packed)]
+pub struct MilanApobCcx {
+    pub macx_id: u8,
+    pub macx_cores: [MilanApobCore; MILAN_APOB_CCX_MAX_CORES],
+}
+
+const MILAN_APOB_CCX_MAX_CCXS: usize = 2;
+
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[repr(packed)]
+pub struct MilanApobCcd {
+    pub macd_id: u8,
+    pub macd_ccxs: [MilanApobCcx; MILAN_APOB_CCX_MAX_CCXS],
+}
+
+const MILAN_APOB_CCX_MAX_CCDS: usize = 8;
+
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[repr(packed)]
+pub struct MilanApobCoremap {
+    pub ccds: [MilanApobCcd; MILAN_APOB_CCX_MAX_CCDS],
+}

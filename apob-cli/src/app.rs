@@ -9,7 +9,7 @@ use ratatui::{
     },
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span, Text},
+    text::{Line, Span},
     widgets::{
         Block, Borders, Cell, Row, Scrollbar, ScrollbarOrientation,
         ScrollbarState, Table, TableState,
@@ -39,7 +39,6 @@ impl DataGrouping {
 }
 
 pub struct App {
-    header: apob::ApobHeader,
     items: Vec<Entry>,
     item_state: TableState,
     item_scroll_state: ScrollbarState,
@@ -55,7 +54,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(header: apob::ApobHeader, items: Vec<Entry>) -> Self {
+    pub fn new(items: Vec<Entry>) -> Self {
         let mut out = Self {
             item_state: TableState::default().with_selected(0),
             item_scroll_state: ScrollbarState::new(items.len()),
@@ -69,7 +68,6 @@ impl App {
             data_focus: false,
             window_height: 16,
             items,
-            header,
         };
         out.set_item_scroll(0);
         out

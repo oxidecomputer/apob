@@ -12,9 +12,12 @@ mod app;
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Prints data contents of all sections
+    /// Prints raw data contents of all sections
     #[clap(short, long)]
-    verbose: bool,
+    raw: bool,
+    /// Decodes known section types
+    #[clap(short, long)]
+    decode: bool,
     /// Runs an interactive viewer
     #[clap(short, long)]
     interactive: bool,
@@ -57,7 +60,7 @@ fn main() -> Result<()> {
 
     if args.interactive {
         let terminal = ratatui::init();
-        let app = app::App::new(*header, entries);
+        let app = app::App::new(entries);
         app.run(terminal);
         ratatui::restore();
     } else {
@@ -76,8 +79,39 @@ fn main() -> Result<()> {
                 entry.inst,
                 entry.size as usize - std::mem::size_of_val(entry)
             );
-            if args.verbose {
+            if args.raw {
                 print_hex(&mut std::io::stdout(), &item.data).unwrap();
+            }
+            if args.decode {
+                if matches!(entry.group(), Some(apob::ApobGroup::GENERAL))
+                    && entry.ty == 6
+                {
+                    println!("    Milan APOB event log");
+                    println!("    -------------------------------------");
+                    println!("    INDEX   CLASS         EVENT  DATA");
+                    let (log, _) =
+                        apob::MilanApobEventLog::ref_from_prefix(&item.data)
+                            .unwrap();
+                    for (i, v) in
+                        log.events[..log.count as usize].iter().enumerate()
+                    {
+                        println!(
+                            "       {i:02x}  {:>12}  {:>6x}  {:#x} {:#x}",
+                            if let Some(c) =
+                                apob::MilanApobEventClass::from_repr(
+                                    v.class as usize
+                                )
+                            {
+                                format!("{c:?} ({:#x})", v.class)
+                            } else {
+                                format!("{:#x}", v.class)
+                            },
+                            v.info,
+                            v.data0,
+                            v.data1
+                        );
+                    }
+                }
             }
         }
     }

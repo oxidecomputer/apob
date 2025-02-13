@@ -49,9 +49,7 @@ impl DataGrouping {
 pub struct App {
     items: Vec<Entry>,
     item_state: TableState,
-    item_scroll_state: ScrollbarState,
     data_state: TableState,
-    data_scroll_state: ScrollbarState,
     data_scroll_cache: HashMap<usize, usize>,
     data_scroll_max: usize,
     data_width: usize,
@@ -66,9 +64,7 @@ impl App {
     pub fn new(items: Vec<Entry>) -> Self {
         let mut out = Self {
             item_state: TableState::default().with_selected(0),
-            item_scroll_state: ScrollbarState::new(items.len()),
             data_state: TableState::default().with_selected(0),
-            data_scroll_state: ScrollbarState::new(1),
             data_scroll_cache: HashMap::new(),
             data_scroll_max: 1,
             data_grouping: DataGrouping::Byte,
@@ -500,18 +496,22 @@ impl App {
         frame.render_stateful_widget(t, area, &mut self.data_state);
 
         // Draw the scroll bar
-        frame.render_stateful_widget(
-            Scrollbar::default()
-                .orientation(ScrollbarOrientation::VerticalRight)
-                .begin_symbol(None)
-                .end_symbol(None)
-                .style(Self::scrollbar_style(focus)),
-            area.inner(Margin {
-                vertical: 1,
-                horizontal: 1,
-            }),
-            &mut self.data_scroll_state,
-        );
+        if let Some(i) = self.data_state.selected() {
+            let mut data_scroll_state =
+                ScrollbarState::new(self.items.len()).position(i);
+            frame.render_stateful_widget(
+                Scrollbar::default()
+                    .orientation(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(None)
+                    .end_symbol(None)
+                    .style(Self::scrollbar_style(focus)),
+                area.inner(Margin {
+                    vertical: 1,
+                    horizontal: 1,
+                }),
+                &mut data_scroll_state,
+            );
+        }
     }
 
     fn border_style(focus: bool) -> Style {
@@ -605,18 +605,22 @@ impl App {
         frame.render_stateful_widget(t, area, &mut self.item_state);
 
         // Draw the scroll bar
-        frame.render_stateful_widget(
-            Scrollbar::default()
-                .orientation(ScrollbarOrientation::VerticalRight)
-                .begin_symbol(None)
-                .end_symbol(None)
-                .style(Self::scrollbar_style(focus)),
-            area.inner(Margin {
-                vertical: 1,
-                horizontal: 1,
-            }),
-            &mut self.item_scroll_state,
-        );
+        if let Some(i) = self.item_state.selected() {
+            let mut item_scroll_state =
+                ScrollbarState::new(self.items.len()).position(i);
+            frame.render_stateful_widget(
+                Scrollbar::default()
+                    .orientation(ScrollbarOrientation::VerticalRight)
+                    .begin_symbol(None)
+                    .end_symbol(None)
+                    .style(Self::scrollbar_style(focus)),
+                area.inner(Margin {
+                    vertical: 1,
+                    horizontal: 1,
+                }),
+                &mut item_scroll_state,
+            );
+        }
     }
 
     pub fn next_item_row(&mut self, d: usize) {
@@ -637,11 +641,10 @@ impl App {
 
     fn set_item_scroll(&mut self, i: usize) {
         self.item_state.select(Some(i));
-        self.item_scroll_state = self.item_scroll_state.position(i);
         self.data_state
             .select(Some(self.data_scroll_cache.get(&i).cloned().unwrap_or(0)));
-        self.data_scroll_max = self.items[i].data.len().div_ceil(16);
-        self.data_scroll_state = ScrollbarState::new(self.data_scroll_max);
+        self.data_scroll_max =
+            self.items[i].data.len().div_ceil(self.data_width);
     }
 
     pub fn next_data_row(&mut self, d: usize) {
@@ -665,6 +668,5 @@ impl App {
             self.data_scroll_cache.insert(j, i);
         }
         self.data_state.select(Some(i));
-        self.data_scroll_state = self.data_scroll_state.position(i);
     }
 }

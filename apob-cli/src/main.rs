@@ -111,6 +111,25 @@ fn main() -> Result<()> {
                             v.data1
                         );
                     }
+                } else if matches!(entry.group(), Some(apob::ApobGroup::FABRIC))
+                    && entry.ty == apob::ApobFabricType::SYS_MEM_MAP as u32
+                {
+                    let (map, holes) =
+                        apob::ApobSysMemMap::ref_from_prefix(&item.data)
+                            .unwrap();
+                    println!("    APOB fabric");
+                    println!("    high_phys: {:#10x}", map.high_phys);
+                    println!("    -------------------------------------");
+                    println!("            BASE        SIZE  TYPE");
+                    let holes =
+                        <[apob::ApobSysMemMapHole]>::ref_from_bytes(holes)
+                            .unwrap();
+                    for h in &holes[..map.hole_count as usize] {
+                        println!(
+                            "    0x{:0>10x}  0x{:0>8x}  {:#04x}",
+                            h.base, h.size, h.ty
+                        );
+                    }
                 }
             }
         }

@@ -16,6 +16,7 @@ use ratatui::{
     },
     Frame,
 };
+use zerocopy::FromBytes;
 
 enum DataGrouping {
     Byte,
@@ -26,6 +27,13 @@ enum DataGrouping {
 enum Endian {
     Little,
     Big,
+}
+
+#[derive(strum::EnumDiscriminants)]
+#[strum_discriminants(name(SpecializedTag))]
+enum SpecializedState {
+    ApobEventLog(TableState),
+    ApobMemMap(TableState),
 }
 
 impl DataGrouping {
@@ -50,6 +58,7 @@ pub struct App {
     data_endian: Endian,
     data_focus: bool,
     data_grouping: DataGrouping,
+    specialized_state: Option<SpecializedState>,
     window_height: u16,
 }
 
@@ -66,6 +75,7 @@ impl App {
             data_width: 8,
             data_endian: Endian::Little,
             data_focus: false,
+            specialized_state: None,
             window_height: 16,
             items,
         };
@@ -205,6 +215,21 @@ impl App {
         .unwrap();
     }
 
+    /// Checks whether we have a specialized drawing algorithm for this entry
+    fn specialized(h: apob::ApobEntry) -> Option<SpecializedTag> {
+        match (h.group(), h.ty) {
+            (Some(apob::ApobGroup::GENERAL), 6) => {
+                Some(SpecializedTag::ApobEventLog)
+            }
+            (Some(apob::ApobGroup::FABRIC), t)
+                if t == apob::ApobFabricType::SYS_MEM_MAP as u32 =>
+            {
+                Some(SpecializedTag::ApobMemMap)
+            }
+            _ => None,
+        }
+    }
+
     fn draw(&mut self, frame: &mut Frame) {
         let cols =
             &Layout::horizontal([Constraint::Length(45), Constraint::Fill(1)]);
@@ -212,10 +237,28 @@ impl App {
         self.window_height = rects[0].height.saturating_sub(3);
         self.render_table(frame, rects[0], !self.data_focus);
 
-        let rows =
-            Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]);
+        let specialized = self
+            .item_state
+            .selected()
+            .and_then(|i| Self::specialized(self.items[i].entry));
+
+        let rows = if specialized.is_some() {
+            Layout::vertical([
+                Constraint::Fill(1),
+                Constraint::Fill(1),
+                Constraint::Length(1),
+            ])
+        } else {
+            Layout::vertical([Constraint::Fill(1), Constraint::Length(1)])
+        };
         let rects = rows.split(rects[1]);
         self.render_data(frame, rects[0], self.data_focus);
+
+        if let Some(s) = specialized {
+            self.render_specialized(s, frame, rects[1]);
+        } else {
+            self.clear_specialized();
+        }
 
         let help = Span::raw(format!(
             " [{}]-byte groups, {}-[e]ndian",
@@ -225,7 +268,134 @@ impl App {
                 Endian::Little => "little",
             }
         ));
-        frame.render_widget(help, rects[1]);
+        frame.render_widget(help, *rects.last().unwrap());
+    }
+
+    fn render_specialized(
+        &mut self,
+        s: SpecializedTag,
+        frame: &mut Frame,
+        rect: Rect,
+    ) {
+        let needs_reset =
+            self.specialized_state.as_ref().map(SpecializedTag::from)
+                != Some(s);
+        let entry = &self.items[self.item_state.selected().unwrap()];
+        if needs_reset {
+            self.specialized_state = Some(match s {
+                SpecializedTag::ApobMemMap => {
+                    SpecializedState::ApobMemMap(TableState::new())
+                }
+                SpecializedTag::ApobEventLog => {
+                    SpecializedState::ApobEventLog(TableState::new())
+                }
+            })
+        }
+
+        let header_style = Style::default().add_modifier(Modifier::BOLD);
+        let selected_row_style = Style::new().add_modifier(Modifier::REVERSED);
+
+        match self.specialized_state.as_mut().unwrap() {
+            SpecializedState::ApobMemMap(data) => {
+                let header = ["BASE", "SIZE", "TYPE"]
+                    .into_iter()
+                    .map(Cell::from)
+                    .collect::<Row>()
+                    .style(header_style);
+                let (map, holes) =
+                    apob::ApobSysMemMap::ref_from_prefix(&entry.data).unwrap();
+                let holes =
+                    <[apob::ApobSysMemMapHole]>::ref_from_bytes(holes).unwrap();
+
+                let holes = holes[..map.hole_count as usize].iter().map(|h| {
+                    [
+                        format!("0x{:0>10x}", h.base),
+                        format!("0x{:0>8x}", h.size),
+                        format!("{:#04x}", h.ty),
+                    ]
+                    .into_iter()
+                    .map(Cell::from)
+                    .collect::<Row>()
+                });
+
+                let t = Table::new(
+                    holes,
+                    [
+                        Constraint::Length(14),
+                        Constraint::Length(12),
+                        Constraint::Length(8),
+                    ],
+                )
+                .header(header)
+                .row_highlight_style(selected_row_style)
+                .block(
+                    Block::new()
+                        .borders(Borders::ALL)
+                        .title("APOB memory map")
+                        .title_style(header_style), // TODO focus
+                );
+
+                frame.render_stateful_widget(t, rect, data);
+            }
+            SpecializedState::ApobEventLog(data) => {
+                let header = ["INDEX", "CLASS", "EVENT", "DATA", ""]
+                    .into_iter()
+                    .map(Cell::from)
+                    .collect::<Row>()
+                    .style(header_style);
+                let (log, _) =
+                    apob::MilanApobEventLog::ref_from_prefix(&entry.data)
+                        .unwrap();
+                let log = log.events[..log.count as usize]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| {
+                        [
+                            format!("{i:02x}"),
+                            if let Some(c) =
+                                apob::MilanApobEventClass::from_repr(
+                                    v.class as usize,
+                                )
+                            {
+                                format!("{c:?} ({:#x})", v.class)
+                            } else {
+                                format!("{:#x}", v.class)
+                            },
+                            format!("{:#x}", v.info),
+                            format!("{:#x}", v.data0),
+                            format!("{:#x}", v.data1),
+                        ]
+                        .into_iter()
+                        .map(Cell::from)
+                        .collect::<Row>()
+                    });
+
+                let t = Table::new(
+                    log,
+                    [
+                        Constraint::Length(7),
+                        Constraint::Length(14),
+                        Constraint::Length(9),
+                        Constraint::Length(10),
+                        Constraint::Length(10),
+                    ],
+                )
+                .header(header)
+                .row_highlight_style(selected_row_style)
+                .block(
+                    Block::new()
+                        .borders(Borders::ALL)
+                        .title("APOB event log")
+                        .title_style(header_style), // TODO focus
+                );
+
+                frame.render_stateful_widget(t, rect, data);
+            }
+        };
+    }
+
+    fn clear_specialized(&mut self) {
+        self.specialized_state = None;
     }
 
     fn resize_data(&mut self, data_width: usize) {
@@ -261,49 +431,52 @@ impl App {
                 (0..width / bs).map(|i| Cell::from(format!("{:02x}", i * bs))),
             )
             .collect::<Row>()
-            .style(header_style)
-            .height(1);
+            .style(header_style);
         let Some(i) = self.item_state.selected() else {
             return;
         };
         let rows =
             self.items[i].data.chunks(width).enumerate().map(|(o, c)| {
                 let offset = o * width;
-                std::iter::once(Cell::from(format!("{:06x}", offset)))
-                    .chain(c.chunks(bs).map(|c| {
-                        let mut s = String::new();
-                        match self.data_endian {
-                            Endian::Little => {
-                                for b in c.iter().rev() {
-                                    s += &format!("{b:02x}");
-                                }
-                            }
-                            Endian::Big => {
-                                for b in c.iter() {
-                                    s += &format!("{b:02x}");
-                                }
+                std::iter::once(
+                    Line::from(format!("{:06x}", offset))
+                        .style(Style::new().add_modifier(Modifier::DIM))
+                        .into(),
+                )
+                .chain(c.chunks(bs).map(|c| {
+                    let mut s = String::new();
+                    match self.data_endian {
+                        Endian::Little => {
+                            for b in c.iter().rev() {
+                                s += &format!("{b:02x}");
                             }
                         }
-                        Cell::from(s)
-                    }))
-                    .chain(
-                        // Empty cells to fill out the remaining size
-                        std::iter::repeat(Cell::from(""))
-                            .take(width / bs - c.len() / bs),
-                    )
-                    .chain(std::iter::once(
-                        c.iter()
-                            .map(|b| {
-                                if b.is_ascii() && !b.is_ascii_control() {
-                                    *b as char
-                                } else {
-                                    '.'
-                                }
-                            })
-                            .collect::<String>()
-                            .into(),
-                    ))
-                    .collect::<Row>()
+                        Endian::Big => {
+                            for b in c.iter() {
+                                s += &format!("{b:02x}");
+                            }
+                        }
+                    }
+                    Cell::from(s)
+                }))
+                .chain(
+                    // Empty cells to fill out the remaining size
+                    std::iter::repeat(Cell::from(""))
+                        .take(width / bs - c.len() / bs),
+                )
+                .chain(std::iter::once(
+                    c.iter()
+                        .map(|b| {
+                            if b.is_ascii() && !b.is_ascii_control() {
+                                *b as char
+                            } else {
+                                '.'
+                            }
+                        })
+                        .collect::<String>()
+                        .into(),
+                ))
+                .collect::<Row>()
             });
 
         let t = Table::new(
@@ -366,15 +539,14 @@ impl App {
             .into_iter()
             .map(Cell::from)
             .collect::<Row>()
-            .style(header_style)
-            .height(1);
+            .style(header_style);
         let cf = |t| Cell::from(Span::from(t));
         let cfl = |t| Cell::from(Line::from(t).alignment(Alignment::Right));
         let rows = self.items.iter().map(|item| {
             let entry = &item.entry;
             let group = entry.group().unwrap();
             let cancelled = entry.cancelled();
-            let style = if cancelled {
+            let group_style = if cancelled {
                 Style::new().add_modifier(Modifier::DIM)
             } else {
                 let color = match group {
@@ -391,11 +563,17 @@ impl App {
                 };
                 Style::new().fg(color)
             };
+            let ty_style = if Self::specialized(*entry).is_some() {
+                Style::new().fg(Color::White)
+            } else {
+                Style::new()
+            };
             [
                 cfl(format!("{:05x}", item.offset)),
                 cf(format!("{:?}{}", group, if cancelled { "*" } else { "" }))
-                    .style(style),
-                cfl(format!("{:x}", entry.ty & !apob::APOB_CANCELLED)),
+                    .style(group_style),
+                cfl(format!("{:x}", entry.ty & !apob::APOB_CANCELLED))
+                    .style(ty_style),
                 cfl(format!("{:x}", entry.inst)),
                 cfl(format!(
                     "{:x}",
@@ -404,7 +582,6 @@ impl App {
             ]
             .into_iter()
             .collect::<Row>()
-            .height(1)
         });
 
         let t = Table::new(

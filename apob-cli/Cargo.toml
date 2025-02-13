@@ -9,4 +9,5 @@ apob.workspace = true
 clap.workspace = true
 crossterm.workspace = true
 ratatui.workspace = true
+strum.workspace = true
 zerocopy.workspace = true

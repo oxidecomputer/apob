@@ -62,6 +62,34 @@ impl ApobEntry {
     }
 }
 
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[repr(C)]
+pub struct ApobSysMemMap {
+    /// Physical address of the upper limit (exclusive) of available RAM
+    pub high_phys: u64,
+
+    /// Number of [`ApobSysMemMapHole`] entries following this structure
+    pub hole_count: u32,
+    _padding: u32,
+}
+
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[repr(C)]
+pub struct ApobSysMemMapHole {
+    /// Base physical address of this hole
+    pub base: u64,
+
+    /// Size of the hole in bytes
+    pub size: u64,
+
+    /// Tag indicating the purpose of this hole
+    ///
+    /// The specific values may vary between different microarchitectures and/or
+    /// firmware.
+    pub ty: u32,
+    _padding: u32,
+}
+
 /// Signature, which must be the first 4 bytes of the blob
 pub const APOB_SIG: [u8; 4] = *b"APOB";
 

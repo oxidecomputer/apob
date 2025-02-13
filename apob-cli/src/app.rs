@@ -9,7 +9,7 @@ use ratatui::{
     },
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
-    text::Text,
+    text::{Line, Span, Text},
     widgets::{
         Block, Borders, Cell, Row, Scrollbar, ScrollbarOrientation,
         ScrollbarState, Table, TableState,
@@ -41,10 +41,10 @@ impl DataGrouping {
 pub struct App {
     header: apob::ApobHeader,
     items: Vec<Entry>,
-    item_state: ratatui::widgets::TableState,
-    item_scroll_state: ratatui::widgets::ScrollbarState,
-    data_state: ratatui::widgets::TableState,
-    data_scroll_state: ratatui::widgets::ScrollbarState,
+    item_state: TableState,
+    item_scroll_state: ScrollbarState,
+    data_state: TableState,
+    data_scroll_state: ScrollbarState,
     data_scroll_cache: HashMap<usize, usize>,
     data_scroll_max: usize,
     data_width: usize,
@@ -114,6 +114,12 @@ impl App {
                         }
                         KeyCode::Char('4') => {
                             self.data_grouping = DataGrouping::DoubleWord
+                        }
+                        KeyCode::Char('e') => {
+                            self.data_endian = match self.data_endian {
+                                Endian::Big => Endian::Little,
+                                Endian::Little => Endian::Big,
+                            }
                         }
                         KeyCode::Char('q') | KeyCode::Esc => break,
                         KeyCode::Char('j') | KeyCode::Down => {
@@ -205,10 +211,23 @@ impl App {
         let cols =
             &Layout::horizontal([Constraint::Length(45), Constraint::Fill(1)]);
         let rects = cols.split(frame.area());
-        self.render_table(frame, rects[0], !self.data_focus);
-        self.render_data(frame, rects[1], self.data_focus);
-
         self.window_height = rects[0].height.saturating_sub(3);
+        self.render_table(frame, rects[0], !self.data_focus);
+
+        let rows =
+            Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]);
+        let rects = rows.split(rects[1]);
+        self.render_data(frame, rects[0], self.data_focus);
+
+        let help = Span::raw(format!(
+            " [{}]-byte groups, {}-[e]ndian",
+            self.data_grouping.bytes(),
+            match self.data_endian {
+                Endian::Big => "big",
+                Endian::Little => "little",
+            }
+        ));
+        frame.render_widget(help, rects[1]);
     }
 
     fn resize_data(&mut self, data_width: usize) {
@@ -270,7 +289,9 @@ impl App {
                         Cell::from(s)
                     }))
                     .chain(
-                        std::iter::repeat(Cell::from("")).take(width - c.len()),
+                        // Empty cells to fill out the remaining size
+                        std::iter::repeat(Cell::from(""))
+                            .take(width / bs - c.len() / bs),
                     )
                     .chain(std::iter::once(
                         c.iter()
@@ -349,8 +370,8 @@ impl App {
             .collect::<Row>()
             .style(header_style)
             .height(1);
-        let cf = |t| Cell::from(Text::from(t));
-        let cfl = |t| Cell::from(Text::from(t).alignment(Alignment::Right));
+        let cf = |t| Cell::from(Span::from(t));
+        let cfl = |t| Cell::from(Line::from(t).alignment(Alignment::Right));
         let rows = self.items.iter().map(|item| {
             let entry = &item.entry;
             let group = entry.group().unwrap();
@@ -408,6 +429,7 @@ impl App {
 
         frame.render_stateful_widget(t, area, &mut self.item_state);
 
+        // Draw the scroll bar
         frame.render_stateful_widget(
             Scrollbar::default()
                 .orientation(ScrollbarOrientation::VerticalRight)

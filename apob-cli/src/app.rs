@@ -17,6 +17,27 @@ use ratatui::{
     Frame,
 };
 
+enum DataGrouping {
+    Byte,
+    Word,
+    DoubleWord,
+}
+
+enum Endian {
+    Little,
+    Big,
+}
+
+impl DataGrouping {
+    fn bytes(&self) -> usize {
+        match self {
+            DataGrouping::Byte => 1,
+            DataGrouping::Word => 2,
+            DataGrouping::DoubleWord => 4,
+        }
+    }
+}
+
 pub struct App {
     header: apob::ApobHeader,
     items: Vec<Entry>,
@@ -27,7 +48,9 @@ pub struct App {
     data_scroll_cache: HashMap<usize, usize>,
     data_scroll_max: usize,
     data_width: usize,
+    data_endian: Endian,
     data_focus: bool,
+    data_grouping: DataGrouping,
     window_height: u16,
 }
 
@@ -40,7 +63,9 @@ impl App {
             data_scroll_state: ScrollbarState::new(1),
             data_scroll_cache: HashMap::new(),
             data_scroll_max: 1,
+            data_grouping: DataGrouping::Byte,
             data_width: 8,
+            data_endian: Endian::Little,
             data_focus: false,
             window_height: 16,
             items,
@@ -80,6 +105,15 @@ impl App {
                             } else {
                                 self.set_item_scroll(0)
                             }
+                        }
+                        KeyCode::Char('1') => {
+                            self.data_grouping = DataGrouping::Byte
+                        }
+                        KeyCode::Char('2') => {
+                            self.data_grouping = DataGrouping::Word
+                        }
+                        KeyCode::Char('4') => {
+                            self.data_grouping = DataGrouping::DoubleWord
                         }
                         KeyCode::Char('q') | KeyCode::Esc => break,
                         KeyCode::Char('j') | KeyCode::Down => {
@@ -204,8 +238,11 @@ impl App {
         };
         self.resize_data(width);
 
+        let bs = self.data_grouping.bytes();
         let header = std::iter::once(Cell::from("OFFSET"))
-            .chain((0..width).map(|i| Cell::from(format!("{i:02x}"))))
+            .chain(
+                (0..width / bs).map(|i| Cell::from(format!("{:02x}", i * bs))),
+            )
             .collect::<Row>()
             .style(header_style)
             .height(1);
@@ -216,7 +253,22 @@ impl App {
             self.items[i].data.chunks(width).enumerate().map(|(o, c)| {
                 let offset = o * width;
                 std::iter::once(Cell::from(format!("{:06x}", offset)))
-                    .chain(c.iter().map(|b| Cell::from(format!("{b:02x}"))))
+                    .chain(c.chunks(bs).map(|c| {
+                        let mut s = String::new();
+                        match self.data_endian {
+                            Endian::Little => {
+                                for b in c.iter().rev() {
+                                    s += &format!("{b:02x}");
+                                }
+                            }
+                            Endian::Big => {
+                                for b in c.iter() {
+                                    s += &format!("{b:02x}");
+                                }
+                            }
+                        }
+                        Cell::from(s)
+                    }))
                     .chain(
                         std::iter::repeat(Cell::from("")).take(width - c.len()),
                     )
@@ -238,7 +290,9 @@ impl App {
         let t = Table::new(
             rows,
             std::iter::once(Constraint::Length(OFFSET_COL))
-                .chain((0..width).map(|_| Constraint::Length(2)))
+                .chain((0..width / bs).map(|_| {
+                    Constraint::Length(u16::try_from(bs * 2).unwrap())
+                }))
                 .chain(std::iter::once(Constraint::Length(
                     u16::try_from(width).unwrap(),
                 ))),

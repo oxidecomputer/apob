@@ -314,6 +314,26 @@ impl App {
                     .collect::<Row>()
                 });
 
+                let border_set = ratatui::symbols::border::Set {
+                    top_left: ratatui::symbols::line::NORMAL.vertical_right,
+                    top_right: ratatui::symbols::line::NORMAL.vertical_left,
+                    ..ratatui::symbols::border::PLAIN
+                };
+                let outer = Block::new()
+                    .borders(Borders::ALL)
+                    .title("APOB memory map")
+                    .title_style(header_style); // TODO focus
+                frame.render_widget(outer, rect);
+
+                let header_rect = rect.inner(Margin::new(1, 1));
+                frame.render_widget(
+                    Span::from(format!("high_phys: {:#x}", map.high_phys)),
+                    header_rect,
+                );
+
+                let mut rect = rect;
+                rect.y += 3;
+                rect.height -= 3;
                 let t = Table::new(
                     holes,
                     [
@@ -327,8 +347,9 @@ impl App {
                 .block(
                     Block::new()
                         .borders(Borders::ALL)
-                        .title("APOB memory map")
-                        .title_style(header_style), // TODO focus
+                        .border_set(border_set)
+                        .title("HOLES")
+                        .title_style(header_style),
                 );
 
                 frame.render_stateful_widget(t, rect, data);
@@ -563,17 +584,22 @@ impl App {
                 };
                 Style::new().fg(color)
             };
-            let ty_style = if Self::specialized(*entry).is_some() {
-                Style::new().fg(Color::White)
-            } else {
-                Style::new()
-            };
+            let specialized = Self::specialized(*entry).is_some();
             [
                 cfl(format!("{:05x}", item.offset)),
-                cf(format!("{:?}{}", group, if cancelled { "*" } else { "" }))
-                    .style(group_style),
-                cfl(format!("{:x}", entry.ty & !apob::APOB_CANCELLED))
-                    .style(ty_style),
+                cf(format!(
+                    "{:?}{}",
+                    group,
+                    if cancelled {
+                        "*"
+                    } else if specialized {
+                        "+"
+                    } else {
+                        ""
+                    }
+                ))
+                .style(group_style),
+                cfl(format!("{:x}", entry.ty & !apob::APOB_CANCELLED)),
                 cfl(format!("{:x}", entry.inst)),
                 cfl(format!(
                     "{:x}",
@@ -588,7 +614,7 @@ impl App {
             rows,
             [
                 Constraint::Length(6),
-                Constraint::Length(7),
+                Constraint::Length(8),
                 Constraint::Length(4),
                 Constraint::Length(8),
                 Constraint::Length(9),

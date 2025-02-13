@@ -56,12 +56,20 @@ impl App {
             ratatui::crossterm::event::EnableMouseCapture
         )
         .unwrap();
+        let mut scroll_momentum = 1;
         loop {
             terminal.draw(|frame| self.draw(frame)).unwrap();
+            let event_was_ready =
+                event::poll(std::time::Duration::from_millis(50))
+                    .unwrap_or(false);
             let e = event::read();
             // Use the mouse to set focus in one pane or the other
             if let Ok(Event::Mouse(m)) = &e {
                 self.data_focus = m.column > 45;
+            }
+            let mut reset_momentum = true;
+            if !event_was_ready {
+                scroll_momentum = 1;
             }
             match e {
                 Ok(Event::Key(key)) if key.kind == KeyEventKind::Press => {
@@ -125,20 +133,31 @@ impl App {
                 }
                 Ok(Event::Mouse(m)) if m.kind == MouseEventKind::ScrollDown => {
                     if self.data_focus {
-                        self.next_data_row(1)
+                        self.next_data_row(scroll_momentum)
                     } else {
-                        self.next_item_row(1)
+                        self.next_item_row(scroll_momentum)
+                    }
+                    if event_was_ready {
+                        reset_momentum = false;
+                        scroll_momentum = (scroll_momentum + 1).min(16);
                     }
                 }
                 Ok(Event::Mouse(m)) if m.kind == MouseEventKind::ScrollUp => {
                     if self.data_focus {
-                        self.prev_data_row(1)
+                        self.prev_data_row(scroll_momentum)
                     } else {
-                        self.prev_item_row(1)
+                        self.prev_item_row(scroll_momentum)
+                    }
+                    if event_was_ready {
+                        reset_momentum = false;
+                        scroll_momentum = (scroll_momentum + 1).min(16);
                     }
                 }
                 Ok(..) => (),
                 Err(_) => break,
+            }
+            if reset_momentum {
+                scroll_momentum = 1;
             }
         }
         ratatui::crossterm::execute!(

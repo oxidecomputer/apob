@@ -25,9 +25,16 @@ struct Args {
     name: PathBuf,
 }
 
+#[derive(Copy, Clone, Debug)]
+enum Item {
+    Header(apob::ApobHeader),
+    Padding,
+    Entry(apob::ApobEntry),
+}
+
 struct Entry {
     offset: usize,
-    entry: apob::ApobEntry,
+    entry: Item,
     data: Vec<u8>,
 }
 
@@ -43,7 +50,19 @@ fn main() -> Result<()> {
     assert_eq!(header.sig, apob::APOB_SIG, "invalid signature");
     assert_eq!(header.version, apob::APOB_VERSION, "invalid version");
 
-    let mut entries = vec![];
+    let header_size = std::mem::size_of_val(header);
+    let mut entries = vec![
+        Entry {
+            offset: 0,
+            entry: Item::Header(*header),
+            data: data[..header_size].to_owned(),
+        },
+        Entry {
+            offset: header_size,
+            entry: Item::Padding,
+            data: data[header_size..header.offset as usize].to_owned(),
+        },
+    ];
     let mut pos = header.offset as usize;
     while pos < data.len() {
         let (entry, _rest) =
@@ -52,7 +71,7 @@ fn main() -> Result<()> {
             &data[pos..][..entry.size as usize][std::mem::size_of_val(entry)..];
         entries.push(Entry {
             offset: pos,
-            entry: *entry,
+            entry: Item::Entry(*entry),
             data: entry_data.to_vec(),
         });
         pos += entry.size as usize;
@@ -70,7 +89,9 @@ fn main() -> Result<()> {
             "OFFSET", "GROUP", "TYPE", "INSTANCE", "DATA SIZE"
         );
         for item in &entries {
-            let entry = &item.entry;
+            let Item::Entry(entry) = &item.entry else {
+                continue;
+            };
             println!(
                 "{:#07x}   {:<8}   {:>4x}   {:>8x}   {:>9x}",
                 item.offset,

@@ -1,4 +1,4 @@
-use crate::Entry;
+use crate::{Entry, Item};
 
 use std::collections::HashMap;
 
@@ -9,9 +9,9 @@ use ratatui::{
     },
     layout::{Alignment, Constraint, Layout, Margin, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
+    text::{Line, Span, Text},
     widgets::{
-        Block, Borders, Cell, Row, Scrollbar, ScrollbarOrientation,
+        Block, Borders, Cell, Paragraph, Row, Scrollbar, ScrollbarOrientation,
         ScrollbarState, Table, TableState,
     },
     Frame,
@@ -33,6 +33,7 @@ enum Endian {
 #[derive(strum::EnumDiscriminants)]
 #[strum_discriminants(name(SpecializedTag))]
 enum SpecializedState {
+    ApobHeader,
     ApobEventLog(TableState),
     ApobMemMap(TableState),
 }
@@ -222,16 +223,20 @@ impl App {
     }
 
     /// Checks whether we have a specialized drawing algorithm for this entry
-    fn specialized(h: apob::ApobEntry) -> Option<SpecializedTag> {
-        match (h.group(), h.ty) {
-            (Some(apob::ApobGroup::GENERAL), 6) => {
-                Some(SpecializedTag::ApobEventLog)
-            }
-            (Some(apob::ApobGroup::FABRIC), t)
-                if t == apob::ApobFabricType::SYS_MEM_MAP as u32 =>
-            {
-                Some(SpecializedTag::ApobMemMap)
-            }
+    fn specialized(i: Item) -> Option<SpecializedTag> {
+        match i {
+            Item::Entry(h) => match (h.group(), h.ty) {
+                (Some(apob::ApobGroup::GENERAL), 6) => {
+                    Some(SpecializedTag::ApobEventLog)
+                }
+                (Some(apob::ApobGroup::FABRIC), t)
+                    if t == apob::ApobFabricType::SYS_MEM_MAP as u32 =>
+                {
+                    Some(SpecializedTag::ApobMemMap)
+                }
+                _ => None,
+            },
+            Item::Header(_) => Some(SpecializedTag::ApobHeader),
             _ => None,
         }
     }
@@ -296,6 +301,7 @@ impl App {
                 SpecializedTag::ApobEventLog => {
                     SpecializedState::ApobEventLog(TableState::new())
                 }
+                SpecializedTag::ApobHeader => SpecializedState::ApobHeader,
             })
         }
 
@@ -418,6 +424,24 @@ impl App {
                 );
 
                 frame.render_stateful_widget(t, rect, data);
+            }
+            SpecializedState::ApobHeader => {
+                let Item::Header(h) = entry.entry else {
+                    panic!();
+                };
+                let lines = vec![
+                    Line::raw("signature: 'APOB'"),
+                    Line::raw(format!("version:   {:#x}", h.version)),
+                    Line::raw(format!("size:      {:#x}", h.size)),
+                    Line::raw(format!("offset:    {:#x}", h.offset)),
+                ];
+                let b = Paragraph::new(Text::from(lines)).block(
+                    Block::new()
+                        .borders(Borders::ALL)
+                        .title("APOB Header")
+                        .title_style(header_style),
+                );
+                frame.render_widget(b, rect);
             }
         };
     }
@@ -622,51 +646,71 @@ impl App {
             .style(header_style);
         let cf = |t| Cell::from(Span::from(t));
         let cfl = |t| Cell::from(Line::from(t).alignment(Alignment::Right));
-        let rows = self.items.iter().map(|item| {
-            let entry = &item.entry;
-            let group = entry.group().unwrap();
-            let cancelled = entry.cancelled();
-            let group_style = if cancelled {
-                Style::new().add_modifier(Modifier::DIM)
-            } else {
-                let color = match group {
-                    apob::ApobGroup::MEMORY => Color::Blue,
-                    apob::ApobGroup::DF => Color::LightBlue,
-                    apob::ApobGroup::CCX => Color::Red,
-                    apob::ApobGroup::NBIO => Color::LightGreen,
-                    apob::ApobGroup::FCH => Color::LightRed,
-                    apob::ApobGroup::PSP => Color::LightCyan,
-                    apob::ApobGroup::GENERAL => Color::Magenta,
-                    apob::ApobGroup::SMBIOS => Color::Green,
-                    apob::ApobGroup::FABRIC => Color::Cyan,
-                    apob::ApobGroup::APCB => Color::LightMagenta,
+        let rows = self.items.iter().map(|item| match &item.entry {
+            Item::Entry(entry) => {
+                let group = entry.group().unwrap();
+                let cancelled = entry.cancelled();
+                let group_style = if cancelled {
+                    Style::new().add_modifier(Modifier::DIM)
+                } else {
+                    let color = match group {
+                        apob::ApobGroup::MEMORY => Color::Blue,
+                        apob::ApobGroup::DF => Color::LightBlue,
+                        apob::ApobGroup::CCX => Color::Red,
+                        apob::ApobGroup::NBIO => Color::LightGreen,
+                        apob::ApobGroup::FCH => Color::LightRed,
+                        apob::ApobGroup::PSP => Color::LightCyan,
+                        apob::ApobGroup::GENERAL => Color::Magenta,
+                        apob::ApobGroup::SMBIOS => Color::Green,
+                        apob::ApobGroup::FABRIC => Color::Cyan,
+                        apob::ApobGroup::APCB => Color::LightMagenta,
+                    };
+                    Style::new().fg(color)
                 };
-                Style::new().fg(color)
-            };
-            let specialized = Self::specialized(*entry).is_some();
-            [
+                let specialized = Self::specialized(item.entry).is_some();
+                [
+                    cfl(format!("{:05x}", item.offset)),
+                    cf(format!(
+                        "{:?}{}",
+                        group,
+                        if cancelled {
+                            "*"
+                        } else if specialized {
+                            "+"
+                        } else {
+                            ""
+                        }
+                    ))
+                    .style(group_style),
+                    cfl(format!("{:x}", entry.ty & !apob::APOB_CANCELLED)),
+                    cfl(format!("{:x}", entry.inst)),
+                    cfl(format!(
+                        "{:x}",
+                        entry.size as usize - std::mem::size_of_val(entry)
+                    )),
+                ]
+                .into_iter()
+                .collect::<Row>()
+            }
+            Item::Header(_) => [
                 cfl(format!("{:05x}", item.offset)),
-                cf(format!(
-                    "{:?}{}",
-                    group,
-                    if cancelled {
-                        "*"
-                    } else if specialized {
-                        "+"
-                    } else {
-                        ""
-                    }
-                ))
-                .style(group_style),
-                cfl(format!("{:x}", entry.ty & !apob::APOB_CANCELLED)),
-                cfl(format!("{:x}", entry.inst)),
-                cfl(format!(
-                    "{:x}",
-                    entry.size as usize - std::mem::size_of_val(entry)
-                )),
+                cf("HEADER+".to_owned()).style(Style::new().fg(Color::Yellow)),
+                cfl("--".to_owned()),
+                cfl("--".to_owned()),
+                cfl("--".to_owned()),
             ]
             .into_iter()
-            .collect::<Row>()
+            .collect::<Row>(),
+            Item::Padding => [
+                cfl(format!("{:05x}", item.offset)),
+                cf("PADDING".to_owned())
+                    .style(Style::new().fg(Color::LightRed)),
+                cfl("--".to_owned()),
+                cfl("--".to_owned()),
+                cfl(format!("{:x}", item.data.len())),
+            ]
+            .into_iter()
+            .collect::<Row>(),
         });
 
         let t = Table::new(

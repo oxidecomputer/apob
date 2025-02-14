@@ -33,9 +33,9 @@ enum Endian {
 #[derive(strum::EnumDiscriminants)]
 #[strum_discriminants(name(SpecializedTag))]
 enum SpecializedState {
-    ApobHeader,
-    ApobEventLog(TableState),
-    ApobMemMap(TableState),
+    Header,
+    EventLog(TableState),
+    MemMap(TableState),
 }
 
 impl DataGrouping {
@@ -227,16 +227,16 @@ impl App {
         match i {
             Item::Entry(h) => match (h.group(), h.ty) {
                 (Some(apob::ApobGroup::GENERAL), 6) => {
-                    Some(SpecializedTag::ApobEventLog)
+                    Some(SpecializedTag::EventLog)
                 }
                 (Some(apob::ApobGroup::FABRIC), t)
                     if t == apob::ApobFabricType::SYS_MEM_MAP as u32 =>
                 {
-                    Some(SpecializedTag::ApobMemMap)
+                    Some(SpecializedTag::MemMap)
                 }
                 _ => None,
             },
-            Item::Header(_) => Some(SpecializedTag::ApobHeader),
+            Item::Header(_) => Some(SpecializedTag::Header),
             _ => None,
         }
     }
@@ -295,13 +295,13 @@ impl App {
         let entry = &self.items[self.item_state.selected().unwrap()];
         if needs_reset {
             self.specialized_state = Some(match s {
-                SpecializedTag::ApobMemMap => {
-                    SpecializedState::ApobMemMap(TableState::new())
+                SpecializedTag::MemMap => {
+                    SpecializedState::MemMap(TableState::new())
                 }
-                SpecializedTag::ApobEventLog => {
-                    SpecializedState::ApobEventLog(TableState::new())
+                SpecializedTag::EventLog => {
+                    SpecializedState::EventLog(TableState::new())
                 }
-                SpecializedTag::ApobHeader => SpecializedState::ApobHeader,
+                SpecializedTag::Header => SpecializedState::Header,
             })
         }
 
@@ -309,7 +309,7 @@ impl App {
         let selected_row_style = Style::new().add_modifier(Modifier::REVERSED);
 
         match self.specialized_state.as_mut().unwrap() {
-            SpecializedState::ApobMemMap(data) => {
+            SpecializedState::MemMap(data) => {
                 let header = ["BASE", "SIZE", "TYPE"]
                     .into_iter()
                     .map(Cell::from)
@@ -339,7 +339,7 @@ impl App {
                 let outer = Block::new()
                     .borders(Borders::ALL)
                     .title("APOB memory map")
-                    .title_style(header_style); // TODO focus
+                    .title_style(header_style); // TODO focus?
                 frame.render_widget(outer, rect);
 
                 let header_rect = rect.inner(Margin::new(1, 1));
@@ -371,8 +371,8 @@ impl App {
 
                 frame.render_stateful_widget(t, rect, data);
             }
-            SpecializedState::ApobEventLog(data) => {
-                let header = ["INDEX", "CLASS", "EVENT", "DATA", ""]
+            SpecializedState::EventLog(data) => {
+                let header = ["INDEX", " CLASS", "EVENT", "DATA", ""]
                     .into_iter()
                     .map(Cell::from)
                     .collect::<Row>()
@@ -380,24 +380,35 @@ impl App {
                 let (log, _) =
                     apob::MilanApobEventLog::ref_from_prefix(&entry.data)
                         .unwrap();
+                let cf = |t| Cell::from(Span::from(t));
+                let cfr =
+                    |t| Cell::from(Line::from(t).alignment(Alignment::Right));
                 let log = log.events[..log.count as usize]
                     .iter()
                     .enumerate()
                     .map(|(i, v)| {
+                        let class = apob::MilanApobEventClass::from_repr(
+                            v.class as usize,
+                        );
+                        let class_color = class.map(|c| match c {
+                            apob::MilanApobEventClass::ALERT => Color::Blue,
+                            apob::MilanApobEventClass::WARN => Color::Green,
+                            apob::MilanApobEventClass::ERROR => Color::Magenta,
+                            apob::MilanApobEventClass::CRIT => Color::Yellow,
+                            apob::MilanApobEventClass::FATAL => Color::Red,
+                        });
                         [
-                            format!("{i:02x}"),
-                            if let Some(c) =
-                                apob::MilanApobEventClass::from_repr(
-                                    v.class as usize,
+                            cfr(format!("{i:02x}")),
+                            if let Some(c) = class {
+                                cf(format!(" {c:?} ({:#x})", v.class)).style(
+                                    Style::new().fg(class_color.unwrap()),
                                 )
-                            {
-                                format!("{c:?} ({:#x})", v.class)
                             } else {
-                                format!("{:#x}", v.class)
+                                cf(format!(" {:#x}", v.class))
                             },
-                            format!("{:#x}", v.info),
-                            format!("{:#x}", v.data0),
-                            format!("{:#x}", v.data1),
+                            cf(format!("{:#x}", v.info)),
+                            cf(format!("{:#x}", v.data0)),
+                            cf(format!("{:#x}", v.data1)),
                         ]
                         .into_iter()
                         .map(Cell::from)
@@ -407,7 +418,7 @@ impl App {
                 let t = Table::new(
                     log,
                     [
-                        Constraint::Length(7),
+                        Constraint::Length(5),
                         Constraint::Length(14),
                         Constraint::Length(9),
                         Constraint::Length(10),
@@ -420,20 +431,25 @@ impl App {
                     Block::new()
                         .borders(Borders::ALL)
                         .title("APOB event log")
-                        .title_style(header_style), // TODO focus
+                        .title_style(header_style), // TODO focus?
                 );
 
                 frame.render_stateful_widget(t, rect, data);
             }
-            SpecializedState::ApobHeader => {
+            SpecializedState::Header => {
                 let Item::Header(h) = entry.entry else {
                     panic!();
                 };
+                let sig = if let Ok(s) = std::str::from_utf8(h.sig.as_slice()) {
+                    format!("'{s}'")
+                } else {
+                    format!("({:?})", h.sig)
+                };
                 let lines = vec![
-                    Line::raw("signature: 'APOB'"),
-                    Line::raw(format!("version:   {:#x}", h.version)),
-                    Line::raw(format!("size:      {:#x}", h.size)),
-                    Line::raw(format!("offset:    {:#x}", h.offset)),
+                    Line::raw(format!("signature: {sig}")),
+                    Line::raw(format!("version:    {:#x}", h.version)),
+                    Line::raw(format!("size:       {:#x}", h.size)),
+                    Line::raw(format!("offset:     {:#x}", h.offset)),
                 ];
                 let b = Paragraph::new(Text::from(lines)).block(
                     Block::new()
@@ -651,7 +667,7 @@ impl App {
             .collect::<Row>()
             .style(header_style);
         let cf = |t| Cell::from(Span::from(t));
-        let cfl = |t| Cell::from(Line::from(t).alignment(Alignment::Right));
+        let cfr = |t| Cell::from(Line::from(t).alignment(Alignment::Right));
         let rows = self.items.iter().map(|item| match &item.entry {
             Item::Entry(entry) => {
                 let group = entry.group().unwrap();
@@ -675,7 +691,7 @@ impl App {
                 };
                 let specialized = Self::specialized(item.entry).is_some();
                 [
-                    cfl(format!("{:05x}", item.offset)),
+                    cfr(format!("{:05x}", item.offset)),
                     cf(format!(
                         "{:?}{}",
                         group,
@@ -688,9 +704,9 @@ impl App {
                         }
                     ))
                     .style(group_style),
-                    cfl(format!("{:x}", entry.ty & !apob::APOB_CANCELLED)),
-                    cfl(format!("{:x}", entry.inst)),
-                    cfl(format!(
+                    cfr(format!("{:x}", entry.ty & !apob::APOB_CANCELLED)),
+                    cfr(format!("{:x}", entry.inst)),
+                    cfr(format!(
                         "{:x}",
                         entry.size as usize - std::mem::size_of_val(entry)
                     )),
@@ -699,21 +715,21 @@ impl App {
                 .collect::<Row>()
             }
             Item::Header(_) => [
-                cfl(format!("{:05x}", item.offset)),
+                cfr(format!("{:05x}", item.offset)),
                 cf("HEADER+".to_owned()).style(Style::new().fg(Color::Yellow)),
-                cfl("--".to_owned()),
-                cfl("--".to_owned()),
-                cfl("--".to_owned()),
+                cfr("--".to_owned()),
+                cfr("--".to_owned()),
+                cfr("--".to_owned()),
             ]
             .into_iter()
             .collect::<Row>(),
             Item::Padding => [
-                cfl(format!("{:05x}", item.offset)),
+                cfr(format!("{:05x}", item.offset)),
                 cf("PADDING".to_owned())
                     .style(Style::new().fg(Color::LightRed)),
-                cfl("--".to_owned()),
-                cfl("--".to_owned()),
-                cfl(format!("{:x}", item.data.len())),
+                cfr("--".to_owned()),
+                cfr("--".to_owned()),
+                cfr(format!("{:x}", item.data.len())),
             ]
             .into_iter()
             .collect::<Row>(),

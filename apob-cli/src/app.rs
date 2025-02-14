@@ -391,8 +391,8 @@ impl App {
                             v.class as usize,
                         );
                         let class_color = class.map(|c| match c {
-                            apob::MilanApobEventClass::ALERT => Color::Blue,
-                            apob::MilanApobEventClass::WARN => Color::Green,
+                            apob::MilanApobEventClass::ALERT => Color::Green,
+                            apob::MilanApobEventClass::WARN => Color::Blue,
                             apob::MilanApobEventClass::ERROR => Color::Magenta,
                             apob::MilanApobEventClass::CRIT => Color::Yellow,
                             apob::MilanApobEventClass::FATAL => Color::Red,

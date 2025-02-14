@@ -104,58 +104,69 @@ fn main() -> Result<()> {
                 print_hex(&mut std::io::stdout(), &item.data).unwrap();
             }
             if args.decode {
-                if matches!(entry.group(), Some(apob::ApobGroup::GENERAL))
-                    && entry.ty == 6
-                {
-                    println!("    Milan APOB event log");
-                    println!("    -------------------------------------");
-                    println!("    INDEX   CLASS         EVENT  DATA");
-                    let (log, _) =
-                        apob::MilanApobEventLog::ref_from_prefix(&item.data)
-                            .unwrap();
-                    for (i, v) in
-                        log.events[..log.count as usize].iter().enumerate()
-                    {
-                        println!(
-                            "       {i:02x}  {:>12}  {:>6x}  {:#x} {:#x}",
-                            if let Some(c) =
-                                apob::MilanApobEventClass::from_repr(
-                                    v.class as usize
-                                )
-                            {
-                                format!("{c:?} ({:#x})", v.class)
-                            } else {
-                                format!("{:#x}", v.class)
-                            },
-                            v.info,
-                            v.data0,
-                            v.data1
-                        );
-                    }
-                } else if matches!(entry.group(), Some(apob::ApobGroup::FABRIC))
-                    && entry.ty == apob::ApobFabricType::SYS_MEM_MAP as u32
-                {
-                    let (map, holes) =
-                        apob::ApobSysMemMap::ref_from_prefix(&item.data)
-                            .unwrap();
-                    println!("    APOB fabric");
-                    println!("    high_phys: {:#10x}", map.high_phys);
-                    println!("    -------------------------------------");
-                    println!("            BASE        SIZE  TYPE");
-                    let holes =
-                        <[apob::ApobSysMemMapHole]>::ref_from_bytes(holes)
-                            .unwrap();
-                    for h in &holes[..map.hole_count as usize] {
-                        println!(
-                            "    0x{:0>10x}  0x{:0>8x}  {:#04x}",
-                            h.base, h.size, h.ty
-                        );
-                    }
-                }
+                decode_item(&mut std::io::stdout(), entry, &item.data).unwrap();
             }
         }
     }
 
+    Ok(())
+}
+
+fn decode_item<W: Write>(
+    out: &mut W,
+    entry: &apob::ApobEntry,
+    data: &[u8],
+) -> Result<(), std::io::Error> {
+    let Some(group) = entry.group() else {
+        return Ok(());
+    };
+    match (group, entry.ty) {
+        (apob::ApobGroup::GENERAL, ty)
+            if ty == apob::ApobGeneralType::EVENT_LOG as u32 =>
+        {
+            writeln!(out, "    Milan APOB event log")?;
+            writeln!(out, "    -------------------------------------")?;
+            writeln!(out, "    INDEX   CLASS         EVENT  DATA")?;
+            let (log, _) =
+                apob::MilanApobEventLog::ref_from_prefix(data).unwrap();
+            for (i, v) in log.events[..log.count as usize].iter().enumerate() {
+                writeln!(
+                    out,
+                    "       {i:02x}  {:>12}  {:>6x}  {:#x} {:#x}",
+                    if let Some(c) =
+                        apob::MilanApobEventClass::from_repr(v.class as usize)
+                    {
+                        format!("{c:?} ({:#x})", v.class)
+                    } else {
+                        format!("{:#x}", v.class)
+                    },
+                    v.info,
+                    v.data0,
+                    v.data1
+                )?;
+            }
+        }
+        (apob::ApobGroup::FABRIC, ty)
+            if ty == apob::ApobFabricType::SYS_MEM_MAP as u32 =>
+        {
+            let (map, holes) =
+                apob::ApobSysMemMap::ref_from_prefix(data).unwrap();
+            writeln!(out, "    APOB fabric")?;
+            writeln!(out, "    high_phys: {:#10x}", map.high_phys)?;
+            writeln!(out, "    -------------------------------------")?;
+            writeln!(out, "            BASE        SIZE  TYPE")?;
+            let holes =
+                <[apob::ApobSysMemMapHole]>::ref_from_bytes(holes).unwrap();
+            for h in &holes[..map.hole_count as usize] {
+                writeln!(
+                    out,
+                    "    0x{:0>10x}  0x{:0>8x}  {:#04x}",
+                    h.base, h.size, h.ty
+                )?;
+            }
+        }
+        _ => (),
+    }
     Ok(())
 }
 

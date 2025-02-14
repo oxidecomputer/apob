@@ -3,6 +3,23 @@
 use strum::FromRepr;
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 
+/// Signature, which must be the first 4 bytes of the blob
+pub const APOB_SIG: [u8; 4] = *b"APOB";
+
+/// Known version
+pub const APOB_VERSION: u32 = 0x18;
+
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[repr(C)]
+pub struct ApobHeader {
+    pub sig: [u8; 4],
+    pub version: u32,
+    pub size: u32,
+    pub offset: u32,
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 #[derive(Copy, Clone, Debug, FromRepr)]
 #[allow(non_camel_case_types)]
 pub enum ApobGroup {
@@ -18,21 +35,8 @@ pub enum ApobGroup {
     APCB,
 }
 
-#[derive(Copy, Clone, Debug, FromRepr)]
-#[allow(non_camel_case_types)]
-pub enum ApobFabricType {
-    SYS_MEM_MAP = 9,
-}
-
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
-#[repr(C)]
-pub struct ApobHeader {
-    pub sig: [u8; 4],
-    pub version: u32,
-    pub size: u32,
-    pub offset: u32,
-}
-
+/// Mask applied to [`ApobEntry::group`] to cancel the group
+pub const APOB_CANCELLED: u32 = 0xFFFF_0000;
 const APOB_HMAC_LEN: usize = 32;
 
 #[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
@@ -62,6 +66,59 @@ impl ApobEntry {
     }
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// GENERAL group handling
+
+#[derive(Copy, Clone, Debug, FromRepr)]
+#[allow(non_camel_case_types)]
+pub enum ApobGeneralType {
+    EVENT_LOG = 6,
+}
+
+/// [`ApobGroup::GENERAL`] + [`ApobGeneralType::EVENT_LOG`]
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[repr(C)]
+pub struct MilanApobEventLog {
+    pub count: u16,
+    _pad: u16,
+    pub events: [MilanApobEvent; 64],
+}
+
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[repr(C)]
+pub struct MilanApobEvent {
+    pub class: u32,
+    pub info: u32,
+    pub data0: u32,
+    pub data1: u32,
+}
+
+#[derive(Copy, Clone, Debug, FromRepr)]
+#[allow(non_camel_case_types)]
+pub enum MilanApobEventClass {
+    ALERT = 5,
+    WARN = 6,
+    ERROR = 7,
+    CRIT = 8,
+    FATAL = 9,
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// FABRIC group handling
+
+#[derive(Copy, Clone, Debug, FromRepr)]
+#[allow(non_camel_case_types)]
+pub enum ApobFabricType {
+    SYS_MEM_MAP = 9,
+    MILAN_FABRIC_PHY_OVERRIDE = 21,
+}
+
+const MILAN_APOB_CCX_MAX_CCDS: usize = 8;
+const MILAN_APOB_CCX_MAX_CCXS: usize = 2;
+const MILAN_APOB_CCX_MAX_CORES: usize = 8;
+const MILAN_APOB_CCX_MAX_THREADS: usize = 2;
+
+/// [`ApobGroup::FABRIC`] + [`ApobFabricType::SYS_MEM_MAP`]
 #[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct ApobSysMemMap {
@@ -90,61 +147,11 @@ pub struct ApobSysMemMapHole {
     _padding: u32,
 }
 
-/// Signature, which must be the first 4 bytes of the blob
-pub const APOB_SIG: [u8; 4] = *b"APOB";
-
-/// Known version
-pub const APOB_VERSION: u32 = 0x18;
-
-/// Mask applied to [`ApobEntry::group`] to cancel the group
-pub const APOB_CANCELLED: u32 = 0xFFFF_0000;
-
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
-#[repr(C)]
-pub struct MilanApobEvent {
-    pub class: u32,
-    pub info: u32,
-    pub data0: u32,
-    pub data1: u32,
-}
-
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
-#[repr(C)]
-pub struct MilanApobEventLog {
-    pub count: u16,
-    _pad: u16,
-    pub events: [MilanApobEvent; 64],
-}
-
-#[derive(Copy, Clone, Debug, FromRepr)]
-#[allow(non_camel_case_types)]
-pub enum MilanApobEventClass {
-    ALERT = 5,
-    WARN = 6,
-    ERROR = 7,
-    CRIT = 8,
-    FATAL = 9,
-}
-
-const MILAN_APOB_CCX_MAX_THREADS: usize = 2;
-
 #[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
 #[repr(packed)]
-pub struct MilanApobCore {
-    pub mac_id: u8,
-    pub mac_thread_exists: [u8; MILAN_APOB_CCX_MAX_THREADS],
+pub struct MilanApobCoremap {
+    pub ccds: [MilanApobCcd; MILAN_APOB_CCX_MAX_CCDS],
 }
-
-const MILAN_APOB_CCX_MAX_CORES: usize = 8;
-
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
-#[repr(packed)]
-pub struct MilanApobCcx {
-    pub macx_id: u8,
-    pub macx_cores: [MilanApobCore; MILAN_APOB_CCX_MAX_CORES],
-}
-
-const MILAN_APOB_CCX_MAX_CCXS: usize = 2;
 
 #[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
 #[repr(packed)]
@@ -153,10 +160,54 @@ pub struct MilanApobCcd {
     pub macd_ccxs: [MilanApobCcx; MILAN_APOB_CCX_MAX_CCXS],
 }
 
-const MILAN_APOB_CCX_MAX_CCDS: usize = 8;
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[repr(packed)]
+pub struct MilanApobCcx {
+    pub macx_id: u8,
+    pub macx_cores: [MilanApobCore; MILAN_APOB_CCX_MAX_CORES],
+}
 
 #[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
 #[repr(packed)]
-pub struct MilanApobCoremap {
-    pub ccds: [MilanApobCcd; MILAN_APOB_CCX_MAX_CCDS],
+pub struct MilanApobCore {
+    pub mac_id: u8,
+    pub mac_thread_exists: [u8; MILAN_APOB_CCX_MAX_THREADS],
+}
+
+/// [`ApobGroup::FABRIC`] + [`ApobFabricType::MILAN_FABRIC_PHY_OVERRIDE`]
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[repr(packed)]
+pub struct MilanApobPhyOverride {
+    pub map_datalen: u32,
+    pub map_data: [u8; 256],
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// MEMORY group
+
+#[derive(Copy, Clone, Debug, FromRepr)]
+#[allow(non_camel_case_types)]
+pub enum ApobMemoryType {
+    MILAN_PMU_TFI_END = 17,
+}
+
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[allow(non_camel_case_types)]
+pub struct PmuTfiEntryBitfield(u32);
+
+/// A single training error entry
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[allow(non_camel_case_types)]
+pub struct PmuTfiEntry {
+    pub bits: PmuTfiEntryBitfield,
+    pub error: u32,
+    pub data: [u32; 4],
+}
+
+/// A single training error entry
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+pub struct PmuTfi {
+    /// Position of the next valid entry
+    pub nvalid: u32,
+    pub entries: [PmuTfiEntry; 40],
 }

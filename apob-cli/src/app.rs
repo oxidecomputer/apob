@@ -534,7 +534,11 @@ impl App {
                 ))
                 .collect::<Row>()
             });
-
+        let title = match self.items[i].entry {
+            Item::Header(..) => "Raw header",
+            Item::Padding => "Padding data",
+            Item::Entry(..) => "Entry data",
+        };
         let t = Table::new(
             rows,
             std::iter::once(Constraint::Length(OFFSET_COL))
@@ -550,7 +554,9 @@ impl App {
         .block(
             Block::new()
                 .borders(Borders::ALL)
-                .border_style(Self::border_style(focus)),
+                .border_style(Self::border_style(focus))
+                .title(title)
+                .title_style(Style::reset().add_modifier(Modifier::BOLD)),
         );
 
         frame.render_stateful_widget(t, area, &mut self.data_state);
@@ -728,7 +734,9 @@ impl App {
         .block(
             Block::new()
                 .borders(Borders::ALL)
-                .border_style(Self::border_style(focus)),
+                .border_style(Self::border_style(focus))
+                .title("APOB entries")
+                .title_style(Style::reset().add_modifier(Modifier::BOLD)),
         );
 
         frame.render_stateful_widget(t, area, &mut self.item_state);

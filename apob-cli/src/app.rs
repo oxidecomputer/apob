@@ -30,7 +30,7 @@ enum Endian {
     Big,
 }
 
-#[derive(strum::EnumDiscriminants)]
+#[derive(strum_macros::EnumDiscriminants)]
 #[strum_discriminants(name(SpecializedTag))]
 enum SpecializedState {
     Header,
@@ -435,7 +435,6 @@ impl App {
                         cf(data1),
                     ]
                     .into_iter()
-                    .map(Cell::from)
                     .collect::<Row>();
                     rows.push(row);
 
@@ -448,7 +447,6 @@ impl App {
                             cf("".to_string()),
                         ]
                         .into_iter()
-                        .map(Cell::from)
                         .collect::<Row>();
                         rows.push(row)
                     };
@@ -534,7 +532,7 @@ impl App {
                     apob::PmuTfi::ref_from_prefix(&entry.data).unwrap();
                 let mut data_len = [0usize; 4];
                 let mut err_len = 0usize;
-                let log = tfi.entries[..tfi.nvalid as usize]
+                let mut log = tfi.entries[..tfi.nvalid as usize]
                     .iter()
                     .enumerate()
                     .map(|(i, v)| {
@@ -558,10 +556,12 @@ impl App {
                             cf(std::mem::take(&mut data_fmt[3])),
                         ]
                         .into_iter()
-                        .map(Cell::from)
                         .collect::<Row>()
                     })
                     .collect::<Vec<_>>();
+                if log.is_empty() {
+                    log.push(std::iter::once(Cell::from(" --")).collect());
+                }
 
                 let t = Table::new(
                     log,
@@ -664,8 +664,10 @@ impl App {
                 }))
                 .chain(
                     // Empty cells to fill out the remaining size
-                    std::iter::repeat(Cell::from(""))
-                        .take(width / bs - c.len() / bs),
+                    std::iter::repeat_n(
+                        Cell::from(""),
+                        width / bs - c.len() / bs,
+                    ),
                 )
                 .chain(std::iter::once(
                     c.iter()

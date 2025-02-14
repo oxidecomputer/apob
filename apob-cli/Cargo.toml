@@ -10,4 +10,5 @@ clap.workspace = true
 crossterm.workspace = true
 ratatui.workspace = true
 strum.workspace = true
+strum_macros.workspace = true
 zerocopy.workspace = true

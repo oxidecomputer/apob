@@ -1,6 +1,6 @@
 #![no_std]
 
-use strum::FromRepr;
+use strum_macros::FromRepr;
 use zerocopy::{FromBytes, Immutable, KnownLayout};
 
 /// Signature, which must be the first 4 bytes of the blob
@@ -186,27 +186,27 @@ pub struct ApobSysMemMapHole {
 }
 
 #[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
-#[repr(packed)]
+#[repr(C, packed)]
 pub struct MilanApobCoremap {
     pub ccds: [MilanApobCcd; MILAN_APOB_CCX_MAX_CCDS],
 }
 
 #[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
-#[repr(packed)]
+#[repr(C, packed)]
 pub struct MilanApobCcd {
     pub macd_id: u8,
     pub macd_ccxs: [MilanApobCcx; MILAN_APOB_CCX_MAX_CCXS],
 }
 
 #[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
-#[repr(packed)]
+#[repr(C, packed)]
 pub struct MilanApobCcx {
     pub macx_id: u8,
     pub macx_cores: [MilanApobCore; MILAN_APOB_CCX_MAX_CORES],
 }
 
 #[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
-#[repr(packed)]
+#[repr(C, packed)]
 pub struct MilanApobCore {
     pub mac_id: u8,
     pub mac_thread_exists: [u8; MILAN_APOB_CCX_MAX_THREADS],
@@ -214,7 +214,7 @@ pub struct MilanApobCore {
 
 /// [`ApobGroup::FABRIC`] + [`ApobFabricType::MILAN_FABRIC_PHY_OVERRIDE`]
 #[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
-#[repr(packed)]
+#[repr(C, packed)]
 pub struct MilanApobPhyOverride {
     pub map_datalen: u32,
     pub map_data: [u8; 256],

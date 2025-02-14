@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-strum.workspace = true
 zerocopy.workspace = true
+strum_macros.workspace = true

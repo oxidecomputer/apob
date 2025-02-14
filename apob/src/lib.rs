@@ -103,6 +103,44 @@ pub enum MilanApobEventClass {
     FATAL = 9,
 }
 
+#[derive(Copy, Clone, Debug, FromRepr)]
+#[allow(non_camel_case_types)]
+pub enum MilanApobEventInfo {
+    TRAIN_ERROR = 0x4001,
+}
+
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[repr(C)]
+pub struct MilanTrainErrorData0(pub u32);
+
+impl MilanTrainErrorData0 {
+    pub fn sock(&self) -> u32 {
+        self.0 & 0xFF
+    }
+    pub fn chan(&self) -> u32 {
+        (self.0 >> 8) & 0xFF
+    }
+    pub fn dimm(&self) -> u32 {
+        (self.0 >> 16) & 0b11
+    }
+    pub fn rank(&self) -> u32 {
+        (self.0 >> 24) & 0b1111
+    }
+}
+
+#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[repr(C)]
+pub struct MilanTrainErrorData1(pub u32);
+
+impl MilanTrainErrorData1 {
+    pub fn pmu_load(&self) -> bool {
+        (self.0 & 1) != 0
+    }
+    pub fn pmu_train(&self) -> bool {
+        (self.0 & 2) != 0
+    }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // FABRIC group handling
 
@@ -188,24 +226,46 @@ pub struct MilanApobPhyOverride {
 #[derive(Copy, Clone, Debug, FromRepr)]
 #[allow(non_camel_case_types)]
 pub enum ApobMemoryType {
-    MILAN_PMU_TFI_END = 17,
+    MILAN_PMU_TRAIN_FAIL = 22,
 }
 
 #[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
-#[allow(non_camel_case_types)]
-pub struct PmuTfiEntryBitfield(u32);
+#[repr(C)]
+pub struct PmuTfiEntryBitfield(pub u32);
+
+impl PmuTfiEntryBitfield {
+    pub fn sock(&self) -> u32 {
+        self.0 & 1
+    }
+    pub fn umc(&self) -> u32 {
+        (self.0 >> 1) & 0b111
+    }
+    /// 0 for 1D and 1 for 2D
+    pub fn dimension(&self) -> u32 {
+        (self.0 >> 4) & 1
+    }
+
+    pub fn num_1d(&self) -> u32 {
+        (self.0 >> 5) & 0b111
+    }
+
+    pub fn stage(&self) -> u32 {
+        (self.0 >> 15) & 0xFFFF
+    }
+}
 
 /// A single training error entry
 #[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
-#[allow(non_camel_case_types)]
+#[repr(C)]
 pub struct PmuTfiEntry {
     pub bits: PmuTfiEntryBitfield,
     pub error: u32,
     pub data: [u32; 4],
 }
 
-/// A single training error entry
+/// A set of training failure entries
 #[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[repr(C)]
 pub struct PmuTfi {
     /// Position of the next valid entry
     pub nvalid: u32,

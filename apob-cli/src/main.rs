@@ -126,13 +126,16 @@ fn decode_item<W: Write>(
         {
             writeln!(out, "    Milan APOB event log")?;
             writeln!(out, "    -------------------------------------")?;
-            writeln!(out, "    INDEX   CLASS         EVENT  DATA")?;
+            writeln!(
+                out,
+                "    INDEX   CLASS        EVENT                 DATA"
+            )?;
             let (log, _) =
                 apob::MilanApobEventLog::ref_from_prefix(data).unwrap();
             for (i, v) in log.events[..log.count as usize].iter().enumerate() {
                 writeln!(
                     out,
-                    "       {i:02x}  {:>12}  {:>6x}  {:#x} {:#x}",
+                    "       {i:02x}  {:>12}  {:<20}  {:#x} {:#x}",
                     if let Some(c) =
                         apob::MilanApobEventClass::from_repr(v.class as usize)
                     {
@@ -140,7 +143,13 @@ fn decode_item<W: Write>(
                     } else {
                         format!("{:#x}", v.class)
                     },
-                    v.info,
+                    if let Some(c) =
+                        apob::MilanApobEventInfo::from_repr(v.info as usize)
+                    {
+                        format!("{c:?} ({:#x})", v.info)
+                    } else {
+                        format!("{:#x}", v.info)
+                    },
                     v.data0,
                     v.data1
                 )?;
@@ -162,6 +171,33 @@ fn decode_item<W: Write>(
                     out,
                     "    0x{:0>10x}  0x{:0>8x}  {:#04x}",
                     h.base, h.size, h.ty
+                )?;
+            }
+        }
+        (apob::ApobGroup::MEMORY, ty)
+            if ty == apob::ApobMemoryType::MILAN_PMU_TRAIN_FAIL as u32 =>
+        {
+            let (p, _) = apob::PmuTfi::ref_from_prefix(data).unwrap();
+            writeln!(out, "    PMU training failure log")?;
+            writeln!(out, "    -------------------------------------")?;
+            writeln!(
+                out,
+                "    INDEX  SOCK UMC   1D2D 1DNUM  STAGE  ERROR   DATA"
+            )?;
+            for (i, h) in p.entries[..p.nvalid as usize].iter().enumerate() {
+                writeln!(
+                    out,
+                    "       {i:02x}  {:>4} {:>3}  {:>5} {:>5} {:>6}  {:x}  {:x} {:x} {:x} {:x}",
+                    h.bits.sock(),
+                    h.bits.umc(),
+                    h.bits.dimension(),
+                    h.bits.num_1d(),
+                    h.bits.stage(),
+                    h.error,
+                    h.data[0],
+                    h.data[1],
+                    h.data[2],
+                    h.data[3],
                 )?;
             }
         }

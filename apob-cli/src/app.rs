@@ -36,6 +36,7 @@ enum SpecializedState {
     Header,
     EventLog(TableState),
     MemMap(TableState),
+    PmuTrainingFailure(TableState),
 }
 
 impl DataGrouping {
@@ -234,6 +235,12 @@ impl App {
                 {
                     Some(SpecializedTag::MemMap)
                 }
+                (Some(apob::ApobGroup::MEMORY), t)
+                    if t == apob::ApobMemoryType::MILAN_PMU_TRAIN_FAIL
+                        as u32 =>
+                {
+                    Some(SpecializedTag::PmuTrainingFailure)
+                }
                 _ => None,
             },
             Item::Header(_) => Some(SpecializedTag::Header),
@@ -301,12 +308,18 @@ impl App {
                 SpecializedTag::EventLog => {
                     SpecializedState::EventLog(TableState::new())
                 }
+                SpecializedTag::PmuTrainingFailure => {
+                    SpecializedState::PmuTrainingFailure(TableState::new())
+                }
                 SpecializedTag::Header => SpecializedState::Header,
             })
         }
 
         let header_style = Style::default().add_modifier(Modifier::BOLD);
         let selected_row_style = Style::new().add_modifier(Modifier::REVERSED);
+
+        let cf = |t| Cell::from(Span::from(t));
+        let cfr = |t| Cell::from(Line::from(t).alignment(Alignment::Right));
 
         match self.specialized_state.as_mut().unwrap() {
             SpecializedState::MemMap(data) => {
@@ -380,49 +393,98 @@ impl App {
                 let (log, _) =
                     apob::MilanApobEventLog::ref_from_prefix(&entry.data)
                         .unwrap();
-                let cf = |t| Cell::from(Span::from(t));
-                let cfr =
-                    |t| Cell::from(Line::from(t).alignment(Alignment::Right));
-                let log = log.events[..log.count as usize]
-                    .iter()
-                    .enumerate()
-                    .map(|(i, v)| {
-                        let class = apob::MilanApobEventClass::from_repr(
-                            v.class as usize,
-                        );
-                        let class_color = class.map(|c| match c {
-                            apob::MilanApobEventClass::ALERT => Color::Green,
-                            apob::MilanApobEventClass::WARN => Color::Blue,
-                            apob::MilanApobEventClass::ERROR => Color::Magenta,
-                            apob::MilanApobEventClass::CRIT => Color::Yellow,
-                            apob::MilanApobEventClass::FATAL => Color::Red,
-                        });
-                        [
-                            cfr(format!("{i:02x}")),
-                            if let Some(c) = class {
-                                cf(format!(" {c:?} ({:#x})", v.class)).style(
-                                    Style::new().fg(class_color.unwrap()),
-                                )
-                            } else {
-                                cf(format!(" {:#x}", v.class))
-                            },
-                            cf(format!("{:#x}", v.info)),
-                            cf(format!("{:#x}", v.data0)),
-                            cf(format!("{:#x}", v.data1)),
+                let mut data0_len = 0;
+                let mut data1_len = 0;
+                let mut rows = vec![];
+                for (i, v) in
+                    log.events[..log.count as usize].iter().enumerate()
+                {
+                    let class =
+                        apob::MilanApobEventClass::from_repr(v.class as usize);
+                    let class_color = class.map(|c| match c {
+                        apob::MilanApobEventClass::ALERT => Color::Green,
+                        apob::MilanApobEventClass::WARN => Color::Blue,
+                        apob::MilanApobEventClass::ERROR => Color::Magenta,
+                        apob::MilanApobEventClass::CRIT => Color::Yellow,
+                        apob::MilanApobEventClass::FATAL => Color::Red,
+                    });
+                    let info =
+                        apob::MilanApobEventInfo::from_repr(v.info as usize);
+                    let data0 = format!("{:#x}", v.data0);
+                    let data1 = format!("{:#x}", v.data1);
+                    data0_len = data0_len.max(data0.len());
+                    data1_len = data1_len.max(data1.len());
+                    let row = [
+                        cfr(format!("{i:02x}")),
+                        if let Some(c) = class {
+                            cf(format!(
+                                " {:<5} ({:#x})",
+                                format!("{c:?}"),
+                                v.class
+                            ))
+                            .style(Style::new().fg(class_color.unwrap()))
+                        } else {
+                            cf(format!(" {:#x}", v.class))
+                        },
+                        if let Some(i) = info {
+                            cf(format!("{i:?} ({:#x})", v.info))
+                        } else {
+                            cf(format!("{:#x}", v.info))
+                        },
+                        cf(data0),
+                        cf(data1),
+                    ]
+                    .into_iter()
+                    .map(Cell::from)
+                    .collect::<Row>();
+                    rows.push(row);
+
+                    let mut push_bonus_event = |txt| {
+                        let row = [
+                            cf("".to_string()),
+                            cf("".to_string()),
+                            cf(txt),
+                            cf("".to_string()),
+                            cf("".to_string()),
                         ]
                         .into_iter()
                         .map(Cell::from)
-                        .collect::<Row>()
-                    });
+                        .collect::<Row>();
+                        rows.push(row)
+                    };
+                    if matches!(
+                        info,
+                        Some(apob::MilanApobEventInfo::TRAIN_ERROR)
+                    ) {
+                        let data0 = apob::MilanTrainErrorData0(v.data0);
+                        push_bonus_event(format!(
+                            "  sock: {}  chan: {}",
+                            data0.sock(),
+                            data0.chan()
+                        ));
+                        push_bonus_event(format!(
+                            "  dimm: {}  rank: {}",
+                            data0.dimm(),
+                            data0.rank()
+                        ));
+                        let data1 = apob::MilanTrainErrorData1(v.data1);
+                        if data1.pmu_load() {
+                            push_bonus_event("  PMU load error".to_string());
+                        }
+                        if data1.pmu_train() {
+                            push_bonus_event("  PMU train error".to_string());
+                        }
+                    }
+                }
 
                 let t = Table::new(
-                    log,
+                    rows,
                     [
                         Constraint::Length(5),
                         Constraint::Length(14),
-                        Constraint::Length(9),
-                        Constraint::Length(10),
-                        Constraint::Length(10),
+                        Constraint::Length(20),
+                        Constraint::Length(data0_len as u16),
+                        Constraint::Length(data1_len as u16),
                     ],
                 )
                 .header(header)
@@ -458,6 +520,75 @@ impl App {
                         .title_style(header_style),
                 );
                 frame.render_widget(b, rect);
+            }
+            SpecializedState::PmuTrainingFailure(data) => {
+                let header = [
+                    "INDEX", "SOCK", "UMC", "1D2D", "1DNUM", "STAGE", "ERROR",
+                    "DATA", "", "", "",
+                ]
+                .into_iter()
+                .map(Cell::from)
+                .collect::<Row>()
+                .style(header_style);
+                let (tfi, _) =
+                    apob::PmuTfi::ref_from_prefix(&entry.data).unwrap();
+                let mut data_len = [0usize; 4];
+                let mut err_len = 0usize;
+                let log = tfi.entries[..tfi.nvalid as usize]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, v)| {
+                        let mut data_fmt = v.data.map(|d| format!("{d:#x}"));
+                        let err_fmt = format!("{:#x}", v.error);
+                        err_len = err_len.max(err_fmt.len());
+                        for (n, d) in data_len.iter_mut().zip(&data_fmt) {
+                            *n = (*n).max(d.len());
+                        }
+                        [
+                            cfr(format!("{i:02x}")),
+                            cfr(v.bits.sock().to_string()),
+                            cfr(v.bits.umc().to_string()),
+                            cfr(v.bits.dimension().to_string()),
+                            cfr(v.bits.num_1d().to_string()),
+                            cfr(v.bits.stage().to_string()),
+                            cf(err_fmt),
+                            cf(std::mem::take(&mut data_fmt[0])),
+                            cf(std::mem::take(&mut data_fmt[1])),
+                            cf(std::mem::take(&mut data_fmt[2])),
+                            cf(std::mem::take(&mut data_fmt[3])),
+                        ]
+                        .into_iter()
+                        .map(Cell::from)
+                        .collect::<Row>()
+                    })
+                    .collect::<Vec<_>>();
+
+                let t = Table::new(
+                    log,
+                    [
+                        Constraint::Length(5),
+                        Constraint::Length(4),
+                        Constraint::Length(3),
+                        Constraint::Length(4),
+                        Constraint::Length(5),
+                        Constraint::Length(5),
+                        Constraint::Length(err_len as u16),
+                        Constraint::Length(data_len[0] as u16),
+                        Constraint::Length(data_len[1] as u16),
+                        Constraint::Length(data_len[2] as u16),
+                        Constraint::Length(data_len[3] as u16),
+                    ],
+                )
+                .header(header)
+                .row_highlight_style(selected_row_style)
+                .block(
+                    Block::new()
+                        .borders(Borders::ALL)
+                        .title("PMU training failure log")
+                        .title_style(header_style), // TODO focus?
+                );
+
+                frame.render_stateful_widget(t, rect, data);
             }
         };
     }
@@ -704,7 +835,7 @@ impl App {
                         }
                     ))
                     .style(group_style),
-                    cfr(format!("{:x}", entry.ty & !apob::APOB_CANCELLED)),
+                    cfr(format!("{:#04x}", entry.ty & !apob::APOB_CANCELLED)),
                     cfr(format!("{:x}", entry.inst)),
                     cfr(format!(
                         "{:x}",

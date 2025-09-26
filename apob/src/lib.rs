@@ -1,7 +1,7 @@
 #![no_std]
 
 use strum_macros::FromRepr;
-use zerocopy::{FromBytes, Immutable, KnownLayout};
+use zerocopy::{FromBytes, Immutable, IntoBytes, KnownLayout};
 
 /// Signature, which must be the first 4 bytes of the blob
 pub const APOB_SIG: [u8; 4] = *b"APOB";
@@ -9,7 +9,7 @@ pub const APOB_SIG: [u8; 4] = *b"APOB";
 /// Known version
 pub const APOB_VERSION: u32 = 0x18;
 
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Copy, Clone, Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct ApobHeader {
     pub sig: [u8; 4],
@@ -39,7 +39,7 @@ pub enum ApobGroup {
 pub const APOB_CANCELLED: u32 = 0xFFFF_0000;
 const APOB_HMAC_LEN: usize = 32;
 
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Copy, Clone, Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct ApobEntry {
     pub group: u32,
@@ -76,7 +76,7 @@ pub enum ApobGeneralType {
 }
 
 /// [`ApobGroup::GENERAL`] + [`ApobGeneralType::EVENT_LOG`]
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Copy, Clone, Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct MilanApobEventLog {
     pub count: u16,
@@ -84,7 +84,7 @@ pub struct MilanApobEventLog {
     pub events: [MilanApobEvent; 64],
 }
 
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Copy, Clone, Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct MilanApobEvent {
     pub class: u32,
@@ -109,7 +109,7 @@ pub enum MilanApobEventInfo {
     TRAIN_ERROR = 0x4001,
 }
 
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Copy, Clone, Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct MilanTrainErrorData0(pub u32);
 
@@ -128,7 +128,7 @@ impl MilanTrainErrorData0 {
     }
 }
 
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Copy, Clone, Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct MilanTrainErrorData1(pub u32);
 
@@ -157,7 +157,7 @@ const MILAN_APOB_CCX_MAX_CORES: usize = 8;
 const MILAN_APOB_CCX_MAX_THREADS: usize = 2;
 
 /// [`ApobGroup::FABRIC`] + [`ApobFabricType::SYS_MEM_MAP`]
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Copy, Clone, Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct ApobSysMemMap {
     /// Physical address of the upper limit (exclusive) of available RAM
@@ -168,7 +168,7 @@ pub struct ApobSysMemMap {
     _padding: u32,
 }
 
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Copy, Clone, Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct ApobSysMemMapHole {
     /// Base physical address of this hole
@@ -185,27 +185,27 @@ pub struct ApobSysMemMapHole {
     _padding: u32,
 }
 
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Copy, Clone, Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C, packed)]
 pub struct MilanApobCoremap {
     pub ccds: [MilanApobCcd; MILAN_APOB_CCX_MAX_CCDS],
 }
 
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Copy, Clone, Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C, packed)]
 pub struct MilanApobCcd {
     pub macd_id: u8,
     pub macd_ccxs: [MilanApobCcx; MILAN_APOB_CCX_MAX_CCXS],
 }
 
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Copy, Clone, Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C, packed)]
 pub struct MilanApobCcx {
     pub macx_id: u8,
     pub macx_cores: [MilanApobCore; MILAN_APOB_CCX_MAX_CORES],
 }
 
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Copy, Clone, Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C, packed)]
 pub struct MilanApobCore {
     pub mac_id: u8,
@@ -213,7 +213,7 @@ pub struct MilanApobCore {
 }
 
 /// [`ApobGroup::FABRIC`] + [`ApobFabricType::MILAN_FABRIC_PHY_OVERRIDE`]
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Copy, Clone, Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C, packed)]
 pub struct MilanApobPhyOverride {
     pub map_datalen: u32,
@@ -229,7 +229,7 @@ pub enum ApobMemoryType {
     MILAN_PMU_TRAIN_FAIL = 22,
 }
 
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Copy, Clone, Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct PmuTfiEntryBitfield(pub u32);
 
@@ -255,7 +255,7 @@ impl PmuTfiEntryBitfield {
 }
 
 /// A single training error entry
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Copy, Clone, Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct PmuTfiEntry {
     pub bits: PmuTfiEntryBitfield,
@@ -264,7 +264,7 @@ pub struct PmuTfiEntry {
 }
 
 /// A set of training failure entries
-#[derive(Copy, Clone, Debug, FromBytes, KnownLayout, Immutable)]
+#[derive(Copy, Clone, Debug, IntoBytes, FromBytes, KnownLayout, Immutable)]
 #[repr(C)]
 pub struct PmuTfi {
     /// Position of the next valid entry
